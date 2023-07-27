@@ -1,0 +1,11 @@
+### Python 
+*.log
+*.pot 
+*.pyc
+__pychache__/
+dev_db/
+
+tmp/
+
+# db
+*.sqlite3
