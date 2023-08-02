@@ -52,8 +52,52 @@ echo 'source <(kubectl completion bash)' >> ~/.bashrc
 # Add alias for kubectl
 echo 'alias k=kubectl' >>~/.bashrc
 echo 'complete -o default -F __start_kubectl k' >>~/.bashrc
-
 ```
 
 ### Proxy-Setup
 If you're on a network behind a proxy, you'll need to configure the container runtime to use the proxy server to access the Internet to download images.
+
+### Get Certificate and Service Token for KubeROS 
+To grant KubeROS API to access the K3s API server, the server's CA certificate and a service account token that has enough permissions are required. 
+
+**CA cerfiticate**
+You can either read the content or use `scp` or similar command to copy the certificate. 
+```
+sudo cat /var/lib/rancher/k3s/server/tls/client-ca.crt
+``` 
+
+**Service Account Token**
+Creating a service account with the Cluster Admin Role is similar to K8s. 
+```
+# Create namespace 
+kubectl create namespace kuberos
+
+# Create service account 
+kubectl -n kuberos create serviceaccount kuberos-admin-sa
+```
+
+This is the slight difference from K8s. The token is not automatically created for the service account. It maybe disabled by default or not supported in K3s. According to this [site](https://docs.k3s.io/installation/kube-dashboard), you can get the token by using the following command: 
+```
+sudo k3s kubectl -n kuberos create token kuberos-admin-sa
+```
+
+Note that, the token cannot be retrieved with `kubectl get token -n kuberos` and cannot be displayed with `kubectl describe -n kuberos kuberos-admin-sa` 
+```
+Name:                kuberos-admin-sa
+Namespace:           kuberos
+Labels:              <none>
+Annotations:         <none>
+Image pull secrets:  <none>
+Mountable secrets:   <none>
+Tokens:              <none>  -> Usually, you will find the token name here in Kubernetes
+Events:              <none>
+```
+
+To test it, you can use: 
+```
+API_SERVER_IP: <your-api-server-ip-addresse>
+TOKEN: <your token from the steps above>
+curl -k -H "Authorization: Bearer $TOKEN" -X GET "https://$API_SERVER_IP:6443/api/v1/nodes" | json_pp
+```
+
+Here is a link for further information to unserstand Kubernetes service accounts: *[Link](https://medium.com/@th3b3ginn3r/understanding-service-accounts-in-kubernetes-e9d2abe19df8)*
