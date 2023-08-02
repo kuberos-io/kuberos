@@ -7,7 +7,7 @@ from .manifest import RosModuleManifest
 from .rosparameter import RosParamMapList
 
 
-class RobotEntity(object):
+class RobotEntity():
     """
     A robot can have multiple onboard computers.
     For simple deployment, we assume that there is only one onboard computer.
@@ -110,7 +110,7 @@ class RobotEntity(object):
                 discovery_svc_name=self.pri_disc_svc_name,
                 target=target_node,
                 node_selector_type='node',
-                container_image=module_mani.container_image, 
+                container_image=module_mani.container_image,
                 entrypoint=module_mani.entrypoint,
                 )
             
@@ -264,93 +264,7 @@ class RobotEntity(object):
         return f'RobotName: {self._robot_name}, Onboard: {self.onboard_module_mani}, Edge: {self.edge_module_mani}'
 
 
-# class SchedulingResult(object):
-    
-#     def __init__(self, 
-#                  ) -> None:
-#         self.success = False
-#         self._metadata = {}
-#         self.target_fleet_nodes = []
-        
-#         self.fleet_node_rosmodules = {}
-        
-#         # self.edge_group = EdgeNodeGroup()
-        
-#         self.available_edge_node_list = []
-#         self.robots = []
-#         print("Init SchedulingResult object")
-
-#     @property
-#     def metadata(self):
-#         return self._metadata
-    
-#     @metadata.setter
-#     def metadata(self, value):
-#         self._metadata = value
-
-#     def add_new_robot(self, primary_node_state: dict):
-#         new_robot = RobotEntity(primary_node_state)
-#         new_robot.bind_primary_discovery_server()
-#         self.robots.append(new_robot)
-    
-#     def bind_rosmodule_to_robot(self, 
-#                                 module_manifest: RosModuleManifest
-#                                 ):
-#         """
-#         DEPRECATED
-#         """
-#         for robot in self.robots:
-#             robot.bind_ros_module(module_manifest, module_manifest.preference)
-#         return True 
-    
-#     def check_onboard_module_validity(self):
-#         for robot in self.robots:
-            
-#             pass 
-    
-#     def get_all_robots(self):
-#         return self.robots
-     
-    
-#     def add_fleet_node(self, 
-#                        hostname: str,
-#                        node_state: dict,):
-        
-#         # check wether the node is already in the list
-#         hostname_list = [node.hostname for node in self.target_fleet_nodes]
-        
-#         if not hostname in hostname_list:
-#             self.target_fleet_nodes.append(FleetNode(hostname, node_state))    
-#         return True
-    
-#     def bind_discovery_server_to_fleet_nodes(self):
-#         """
-#         Bind a default discovery server to every fleet node. 
-#         """
-#         for node in self.target_fleet_nodes:
-#             node.add_discovery_server()
-        
-#     def add_edge_node_group(self, 
-#                             edge_node_group: EdgeNodeGroup):
-#         self.edge_group = edge_node_group
-
-
-#     def add_new_edge_modules(self):
-#         pass 
-    
-#     def get_k8s_manifest_yaml(self):
-#         pass 
-    
-#     def get_k8s_manifest_dict(self):
-#         pass
-    
-#     def get_manifest_for_pykuberos_executer(self):
-#         pass 
-
-    
-    
-
-class SchedulingMsgs(object):
+class SchedulingMsgs():
     """
     Gathering the analysis result from the scheduler. 
     Add message to the message queue.
@@ -363,23 +277,36 @@ class SchedulingMsgs(object):
     """
     def __init__(self, ) -> None:
         self.msgs = []
-        
-    def add_msg(self, 
+
+    def add_msg(self,
                    msg_type: str,
                    msg: str):
+        """
+        Add msg with msg type: 
+        args: 
+            - msg_type: debug | info | warning | error
+        """
         if msg_type not in ['debug', 'info', 'warning', 'error']:
             print("Invalid msg type")
             self.msgs.append({msg_type: msg})
-    
+
     def contains_error(self):
+        """
+        Check whether error occured in the scheduling process.
+        """
         for msg in self.msgs:
             if 'error' in msg.keys():
                 return True
         return False
-    
-    def get_msgs(self):
-        return self.msgs
-    
-    def print_msgs(self):
-        print(self.msgs)    
 
+    def get_msgs(self):
+        """
+        Get all messages
+        """
+        return self.msgs
+
+    def print_msgs(self):
+        """
+        Print messages for debugging
+        """
+        print(self.msgs)

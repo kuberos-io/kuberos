@@ -1,4 +1,3 @@
-
 from .scheduler import KuberosScheduler
 
 
@@ -30,5 +29,4 @@ fleet = {
         }
     ]
 }
-
 

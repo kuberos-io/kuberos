@@ -2,7 +2,7 @@
 import json
 
 # pykuberos
-from .rosparameter import RosParamMapList, RosParameterList
+from .rosparameter import RosParameterList
 
 
 DEFAULT_DDS_IMAGE_URL = 'fogrobo.com:5050/kuberos/kuberos_examples/ros_basic_tutorials/humble-ros-core-jammy:latest'
@@ -11,11 +11,14 @@ DEFAULT_ROS_VERSION = 'humble'
 DEFAULT_CONTAINER_RESTART_POLICY = 'Never'
 
 
-def convert_string_to_linux_convention(t: str) -> str: 
-    return "_".join( t.split('-')).upper()
+def convert_string_to_linux_convention(strings: str) -> str:
+    """
+    Convert the string to kubernetes naming convention
+    """
+    return "_".join(strings.split('-')).upper()
 
 
-class RosModule(object):
+class RosModule():
     """
     Basis deployable unit in KubeROS 
     Each rosmodule contains serveral cohesive ros packages (nodes) to perform a certain task.
@@ -138,9 +141,12 @@ class RosModule(object):
         return self._pod_manifest
     
     def get_kubernetes_manifest(self):
+        """
+        Return the kubernetes pod manifests for deploying the ros module to the target nodes.
+        """
         return self.pod_manifest
     
-    def attach_configmap_yaml(self, 
+    def attach_configmap_yaml(self,
                          configmap_name: str,
                          mount_path: str) -> None:
         
