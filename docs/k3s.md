@@ -67,7 +67,7 @@ To grant KubeROS API to access the K3s API server, the server's CA certificate a
 **CA cerfiticate**
 You can either read the content or use `scp` or similar command to copy the certificate. 
 ```bash
-sudo cat /var/lib/rancher/k3s/server/tls/client-ca.crt
+sudo cat /var/lib/rancher/k3s/server/tls/server-ca.crt
 ``` 
 
 **Service Account Token**
