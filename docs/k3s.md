@@ -8,12 +8,12 @@
 Compared to the native Kubernetes, the installation of K3s is very easy. It provides an installation script to install it in a convenient way. 
 
 To install the server (Master node):
-```
+```bash
 curl -sfL https://get.k3s.io | sh -
 ```
 
 To install the agent (Worker nodes): 
-```
+```bash
 curl -sfL https://get.k3s.io | K3S_URL=https://<server-ip>:6443 K3S_TOKEN=<server-node-token> sh -
 ```
 Replace the `<server-ip>` and `<server-node-token>` which is stored at `/var/lib/rancher/k3s/server/node-token` on the master node.
@@ -23,7 +23,7 @@ Replace the `<server-ip>` and `<server-node-token>` which is stored at `/var/lib
 ### Post-Installation - Using Kubectl
 To use `kubetl` to inspect the cluster directly without `sudo`, you can do the following 
 
-```
+```bash
 # Copy the config file `k3s.yml` to the user's home directory 
 sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config/k3s.yaml
 
@@ -42,7 +42,7 @@ echo "KUBECONFIG=~/.kube/config/k3s.yaml" >> ~/.bashrc
 kubectl provides autocompletions support for Bash, Zsh, Fish and Powershell. 
 
 
-```
+```bash
 # Install bash-completion
 apt-get install bash-completion
 
@@ -62,13 +62,13 @@ To grant KubeROS API to access the K3s API server, the server's CA certificate a
 
 **CA cerfiticate**
 You can either read the content or use `scp` or similar command to copy the certificate. 
-```
+```bash
 sudo cat /var/lib/rancher/k3s/server/tls/client-ca.crt
 ``` 
 
 **Service Account Token**
 Creating a service account with the Cluster Admin Role is similar to K8s. 
-```
+```bash
 # Create namespace 
 kubectl create namespace kuberos
 
@@ -77,19 +77,19 @@ kubectl -n kuberos create serviceaccount kuberos-admin-sa
 ```
 
 This is the slight difference from K8s. The token is not automatically created for the service account. It maybe disabled by default or not supported in K3s. According to this [site](https://docs.k3s.io/installation/kube-dashboard), you can get the token by using the following command: 
-```
+```bash
 sudo k3s kubectl -n kuberos create token kuberos-admin-sa
 ```
 
 Note that, the token cannot be retrieved with `kubectl get token -n kuberos` and cannot be displayed with `kubectl describe -n kuberos kuberos-admin-sa` 
-```
+```bash
 Name:                kuberos-admin-sa
 Namespace:           kuberos
 Labels:              <none>
 Annotations:         <none>
 Image pull secrets:  <none>
 Mountable secrets:   <none>
-Tokens:              <none>  -> Usually, you will find the token name here in Kubernetes
+Tokens:              <none>  # -> Usually, you will find the token name here in Kubernetes
 Events:              <none>
 ```
 
@@ -101,3 +101,17 @@ curl -k -H "Authorization: Bearer $TOKEN" -X GET "https://$API_SERVER_IP:6443/ap
 ```
 
 Here is a link for further information to unserstand Kubernetes service accounts: *[Link](https://medium.com/@th3b3ginn3r/understanding-service-accounts-in-kubernetes-e9d2abe19df8)*
+
+### Preparing the YAML File for Cluster Registration in KubeROS 
+
+Registration YAML file definition: 
+```yaml
+apiVersion: v1alpha
+kind: ClusterRegistration
+metadata:
+  name: <kubernetes_cluster_name>
+  description: 'Short description'
+  api_server: https://<K3s-api-server-addresse>:6443
+  ca_cert: <path to cluster_ca.crt>
+  service_token_admin: eyJhbGciOiJSUzI1NiIsImtxxxxxxxxxxx
+```
