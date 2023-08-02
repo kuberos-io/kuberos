@@ -54,8 +54,12 @@ echo 'alias k=kubectl' >>~/.bashrc
 echo 'complete -o default -F __start_kubectl k' >>~/.bashrc
 ```
 
+
+
 ### Proxy-Setup
 If you're on a network behind a proxy, you'll need to configure the container runtime to use the proxy server to access the Internet to download images.
+
+
 
 ### Get Certificate and Service Token for KubeROS 
 To grant KubeROS API to access the K3s API server, the server's CA certificate and a service account token that has enough permissions are required. 
@@ -102,6 +106,8 @@ curl -k -H "Authorization: Bearer $TOKEN" -X GET "https://$API_SERVER_IP:6443/ap
 
 Here is a link for further information to unserstand Kubernetes service accounts: *[Link](https://medium.com/@th3b3ginn3r/understanding-service-accounts-in-kubernetes-e9d2abe19df8)*
 
+
+
 ### Preparing the YAML File for Cluster Registration in KubeROS 
 
 Registration YAML file definition: 
@@ -110,8 +116,9 @@ apiVersion: v1alpha
 kind: ClusterRegistration
 metadata:
   name: <kubernetes_cluster_name>
+  clusterType: K3S 
   description: 'Short description'
-  api_server: https://<K3s-api-server-addresse>:6443
-  ca_cert: <path to cluster_ca.crt>
-  service_token_admin: eyJhbGciOiJSUzI1NiIsImtxxxxxxxxxxx
+  apiServer: https://<K3s-api-server-addresse>:6443
+  caCert: <path to cluster_ca.crt>
+  serviceTokenAdmin: eyJhbGciOiJSUzI1NiIsImtxxxxxxxxxxx
 ```
