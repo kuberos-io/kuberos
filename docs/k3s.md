@@ -82,7 +82,7 @@ kubectl -n kuberos create serviceaccount kuberos-admin-sa
 
 This is the slight difference from K8s. The token is not automatically created for the service account. It maybe disabled by default or not supported in K3s. According to this [site](https://docs.k3s.io/installation/kube-dashboard), you can get the token by using the following command: 
 ```bash
-sudo k3s kubectl -n kuberos create token kuberos-admin-sa
+sudo k3s kubectl -n kuberos create token kuberos-admin-sa --ttl=0
 ```
 
 Note that, the token cannot be retrieved with `kubectl get token -n kuberos` and cannot be displayed with `kubectl describe -n kuberos kuberos-admin-sa` 
@@ -99,8 +99,8 @@ Events:              <none>
 
 To test it, you can use: 
 ```
-API_SERVER_IP: <your-api-server-ip-addresse>
-TOKEN: <your token from the steps above>
+API_SERVER_IP=<your-api-server-ip-addresse>
+TOKEN=your token from the steps above>
 curl -k -H "Authorization: Bearer $TOKEN" -X GET "https://$API_SERVER_IP:6443/api/v1/nodes" | json_pp
 ```
 
@@ -116,9 +116,13 @@ apiVersion: v1alpha
 kind: ClusterRegistration
 metadata:
   name: <kubernetes_cluster_name>
-  clusterType: K3S 
+  clusterType: k3s
   description: 'Short description'
   apiServer: https://<K3s-api-server-addresse>:6443
   caCert: <path to cluster_ca.crt>
   serviceTokenAdmin: eyJhbGciOiJSUzI1NiIsImtxxxxxxxxxxx
 ```
+
+
+### Issues
+ - [ ] Service account token expires automatically in about 1 hour. 
