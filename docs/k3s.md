@@ -35,7 +35,7 @@ sudo chmod 600 ~/.kube/config/k3s.yaml
 export KUBECONFIG=~/.kube/config/k3s.yaml
 
 # Optional, add this to `bashrc` or `bash_profile`
-echo "KUBECONFIG=~/.kube/config/k3s.yaml" >> ~/.bashrc
+echo "export KUBECONFIG=~/.kube/config/k3s.yaml" >> ~/.bashrc
 ```
 
 **Enable shell autocompletion**: 
@@ -82,7 +82,7 @@ kubectl -n kuberos create serviceaccount kuberos-admin-sa
 
 This is the slight difference from K8s. The token is not automatically created for the service account. It maybe disabled by default or not supported in K3s. According to this [site](https://docs.k3s.io/installation/kube-dashboard), you can get the token by using the following command: 
 ```bash
-sudo k3s kubectl -n kuberos create token kuberos-admin-sa --ttl=0
+sudo k3s kubectl -n kuberos create token kuberos-admin-sa
 ```
 
 Note that, the token cannot be retrieved with `kubectl get token -n kuberos` and cannot be displayed with `kubectl describe -n kuberos kuberos-admin-sa` 
@@ -98,7 +98,7 @@ Events:              <none>
 ```
 
 To test it, you can use: 
-```
+```bash
 API_SERVER_IP=<your-api-server-ip-addresse>
 TOKEN=your token from the steps above>
 curl -k -H "Authorization: Bearer $TOKEN" -X GET "https://$API_SERVER_IP:6443/api/v1/nodes" | json_pp
@@ -125,4 +125,4 @@ metadata:
 
 
 ### Issues
- - [ ] Service account token expires automatically in about 1 hour. 
+ - [ ] Service account token expires automatically in about 1 hour.
