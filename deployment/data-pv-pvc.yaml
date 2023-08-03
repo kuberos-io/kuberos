@@ -9,7 +9,7 @@ spec:
   capacity:
     storage: 5Gi # total capacity for this persistent volume
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   hostPath: # where pesistent volume is created on the kubernetes node (needs to be /data for minikube)
     path: "/home/iras-admin/kuberos-data/data"
 ---
@@ -22,7 +22,7 @@ metadata:
 spec:
   # storageClassName: manual
   accessModes:
-    - ReadWriteOnce # mount as read-write by a single node
+    - ReadWriteMany # mount as read-write by a single node
   resources:
     requests:
       storage: 2Gi # storage capacity consumed from the persistent volume

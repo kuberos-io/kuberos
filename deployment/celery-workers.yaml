@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  labels:
+    deployment: celery-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      pod: celery-worker
+  template:
+    metadata:
+      labels:
+        pod: celery-worker
+    spec:
+      containers:
+      - name: kuberos-api-server
+        image: metagoto/kuberos:v0.1
+        imagePullPolicy: Always
+        command: ['/bin/bash']
+        args: ['-c', 'celery -A settings worker -l info']
+        env:
+          - name: PORT
+            value: "8000"
+          - name: REDIS_HOST
+            value: redis-service
+          - name: POSTGRESQL_HOST
+            value: postgres-service
+          - name: MODE
+            value: production
+        volumeMounts:
+          - mountPath: /kuberos/media
+            name: data-volume-mount
+      volumes:
+        - name: data-volume-mount
+          persistentVolumeClaim:
+            claimName: data-pv-claim
+      imagePullSecrets:
+        - name: kuberos-test-repo
+      nodeSelector: 
+        kubernetes.io/hostname: server01
+      tolerations: 
+        - key: "node-role.kubernetes.io/control-plane"
+          operator: "Exists"
+          effect: "NoSchedule"
