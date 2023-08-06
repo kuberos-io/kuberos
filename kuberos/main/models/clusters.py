@@ -540,6 +540,11 @@ class ClusterNode(BaseModel):
         null=True
     )
 
+    # tag to determine whether the labels need to be synchronized to the cluster.
+    is_label_synced = models.BooleanField(
+        default=False
+    )
+
     # k8s cluster node state
     # refer to https://kubernetes.io/docs/concepts/architecture/nodes/#condition
     # the cluster node condition presents the status of the node in the cluster 
@@ -621,6 +626,16 @@ class ClusterNode(BaseModel):
                 'labels': self.labels,
                 }
 
+    def check_label_update_result(self,
+                                  new_labels: dict) -> None:
+        """
+        Check the labels returned by the cluster node after the update
+        """
+        # TODO Compared the new labels and cached labels
+        # print("New labels:", new_labels)
+        self.is_label_synced = True
+        self.save()
+        
     def update_from_inventory_manifest(self,
                                        kuberos_role: str,
                                        robot_name: str,
@@ -645,6 +660,7 @@ class ClusterNode(BaseModel):
         self.device_group = onboard_computer_group
         self.peripheral_devices = periphal_devices
         self.kuberos_registered = True
+        self.is_label_synced = False
         self.save()
 
 
@@ -660,6 +676,7 @@ class ClusterNode(BaseModel):
         """
         self.labels['fleet.kuberos.io/name'] = fleet_name
         self.labels['fleet.kuberos.io/uuid'] = fleet_node_uuid
+        self.is_label_synced = True
         self.save()
 
 
@@ -669,6 +686,7 @@ class ClusterNode(BaseModel):
         """
         self.labels['fleet.kuberos.io/name'] = ''
         self.labels['fleet.kuberos.io/uuid'] = ''
+        self.is_label_synced = True
         self.save()
 
 
