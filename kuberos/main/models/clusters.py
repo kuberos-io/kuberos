@@ -1,16 +1,15 @@
-# Python 
+# Python
 import base64
 import logging
-import json
 from typing import Union, List
 
-# Django 
+# Django
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.utils.timesince import timesince
 from django.utils import timezone
 
-# KubeROS 
+# KubeROS
 from .base import BaseTagModel, BaseModel, UserRelatedBaseModel
 from .hosts import Host
 
@@ -290,7 +289,7 @@ class Cluster(BaseTagModel):
         for node in self.cluster_node_set.all():
             cluster_node_name_list.append(node.hostname)
         return cluster_node_name_list
-    
+
     def get_cluster_node_labels(self) -> List[dict]:
         """
         Return the labels of the cluster ndoes. 
@@ -304,8 +303,8 @@ class Cluster(BaseTagModel):
         """
         node_labels_list = [node.get_node_labels() for node in self.cluster_node_set.all()]
         return node_labels_list
-    
-    
+
+
     def get_available_edge_node_state(self) -> List[dict]:
         """
         Return the available edge nodes for scheduling
@@ -316,7 +315,7 @@ class Cluster(BaseTagModel):
                 node_state = node.get_node_state_for_scheduling()
                 ava_edge_nodes.append(node_state)
         return ava_edge_nodes
-    
+
 
     def find_c_node_by_robot_name(self, 
                                   robot_name: str) -> List[dict]:
@@ -330,7 +329,7 @@ class Cluster(BaseTagModel):
         return node_l
 
 
-    def reset_cluster(self, 
+    def reset_cluster(self,
                       hard_reset: bool = False) -> None:
         for node in self.cluster_node_set.all():
             node.reset()
