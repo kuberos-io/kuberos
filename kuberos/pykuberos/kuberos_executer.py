@@ -380,7 +380,7 @@ class KubernetesExecuter():
 
         except ApiException as exc:
             if exc.reason == 'Not Found':
-                pod_status['status'] = 'Not Found'
+                pod_status['status'] = 'NotFound'
                 self._response.set_data(pod_status)
                 self._response.set_success()
             else:
@@ -462,7 +462,7 @@ class KubernetesExecuter():
 
         except ApiException as exc:
             if exc.reason == 'Not Found':
-                svc_status['status'] = 'Not Found'
+                svc_status['status'] = 'NotFound'
                 self._response.set_data(svc_status)
                 self._response.set_success()
             else:
@@ -663,7 +663,7 @@ class KuberosExecuter(KubernetesExecuter):
             for pod in pod_list:
                 logger.debug("Check pod status: %s", pod['name'])
                 check_res=self.check_pod_status(pod_name=pod['name'])
-                pod.update(check_res)
+                pod.update(check_res['data'])
             self._response.set_data(pod_list)
             self._response.set_success()
             return self._response.to_dict()
@@ -687,7 +687,7 @@ class KuberosExecuter(KubernetesExecuter):
             for svc in svc_list:
                 logger.debug("Check svc status: %s", svc['name'])
                 check_res=self.check_service_status(svc_name=svc['name'])
-                svc.update(check_res)
+                svc.update(check_res['data'])
             self._response.set_data(svc_list)
             self._response.set_success()
             return self._response.to_dict()
