@@ -40,5 +40,3 @@ from .rospackages import (
     RosModuleMeta,
     RosModuleVersion
 )
-
-

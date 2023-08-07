@@ -255,6 +255,7 @@ class Cluster(BaseTagModel):
         """ Update last sync time """
         self.last_sync_time = timezone.now()
         self.is_available = True
+        self.cluster_status = self.ClusterStatusChoices.READY
         self.save()
 
     def report_error(self,
@@ -598,12 +599,15 @@ class ClusterNode(BaseModel):
         Check if the cluster node is available to be assigned to a fleet.
         Rule: 
             - If the node is a control plane node, it is not available
+            - If the node is not registred in KubeROS with inventory manifest
             - If the node is already assigned to a fleet, it is not available
         """
+        
         if self.kuberos_role in [self.ROLE_CHOICES.CONTROL_PLANE, self.ROLE_CHOICES.UNASSIGNED]:
             return False
-        if  not self.kuberos_registered:
-            return False        
+        if not self.kuberos_registered:
+            return False
+        
         # get the related fleet node
         fleet_nodes = self.cluster_node_set.all()
         if len(fleet_nodes) == 0 or self.shared==True:
