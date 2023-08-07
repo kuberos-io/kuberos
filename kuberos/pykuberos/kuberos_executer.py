@@ -2,7 +2,7 @@
 import sys
 import time
 import logging
-from typing import Union, Literal
+from typing import List
 
 # Kubernetes
 import kubernetes
@@ -85,7 +85,7 @@ class ExecutionResponse():
 
         self._errors.append({
             'reason': err_reason,
-            'msg': err_msg,
+            'err_msg': err_msg,
             'msg_verbose': err_msg_verbose
         })
 
@@ -94,12 +94,27 @@ class ExecutionResponse():
         """
         Add the error message from ApiException to the response.
         """
+
         self._add_error(
             err_reason=exc.reason,
-            err_msg='Cluster is not reachable',
+            err_msg=self.parse_error_reason(exc),
             err_msg_verbose=exc.body
         )
         self._status = 'failed'
+
+    def parse_error_reason(self,
+                           exc: ApiException) -> str:
+        """
+        Return a more readable error message for KubeROS users
+        """
+        msg = 'Cluster is not reachable.'
+
+        reason = exc.reason
+        if reason == 'Unauthorized':
+            msg = 'Cluster service account token is invalid or expired.'
+
+        return msg
+
 
     def set_rejected(self,
                      reason: str,
@@ -291,7 +306,9 @@ class KubernetesExecuter():
             node.metadata.labels.update(labels)
             res = self._kube_core_api.patch_node(name=node_name,
                                                  body=node)
-            self._response.set_data(res)
+            
+            new_labels = res.metadata.labels
+            self._response.set_data(new_labels)
             self._response.set_success()
 
         except ApiException as exc:
@@ -355,13 +372,19 @@ class KubernetesExecuter():
 
             # check if the pod is in the terminating state
             if res.metadata.deletion_timestamp is not None:
+                
                 pod_status['status'] = 'Terminating'
 
             self._response.set_data(pod_status)
             self._response.set_success()
 
         except ApiException as exc:
-            self._response.raise_api_exception_error(exc)
+            if exc.reason == 'Not Found':
+                pod_status['status'] = 'Not Found'
+                self._response.set_data(pod_status)
+                self._response.set_success()
+            else:
+                self._response.raise_api_exception_error(exc)
 
         return self._response.to_dict()
 
@@ -380,7 +403,10 @@ class KubernetesExecuter():
             self._response.set_success()
 
         except ApiException as exc:
-            self._response.raise_api_exception_error(exc)
+            if exc.reason == 'Not Found':
+                self._response.set_success()
+            else:
+                self._response.raise_api_exception_error(exc)
 
         return self._response.to_dict()
 
@@ -431,11 +457,16 @@ class KubernetesExecuter():
             svc_status['status'] = 'Found'
             svc_status['cluster_ip'] = res.spec.cluster_ip
             svc_status['ports'] = self._kube_client.sanitize_for_serialization(res.spec.ports)
-            self._response.set_data(res)
+            self._response.set_data(svc_status)
             self._response.set_success()
 
         except ApiException as exc:
-            self._response.raise_api_exception_error(exc)
+            if exc.reason == 'Not Found':
+                svc_status['status'] = 'Not Found'
+                self._response.set_data(svc_status)
+                self._response.set_success()
+            else:
+                self._response.raise_api_exception_error(exc)
 
         return self._response.to_dict()
 
@@ -516,10 +547,13 @@ class KubernetesExecuter():
             self._response.set_success()
 
         except ApiException as exc:
-            self._response.raise_api_exception_error(exc)
+            if exc.reason == 'Not Found':
+                # if the configmap is not found, set the response as success
+                self._response.set_success()
+            else:
+                self._response.raise_api_exception_error(exc)
 
         return self._response.to_dict()
-
 
 
 class KuberosExecuter(KubernetesExecuter):
@@ -539,8 +573,8 @@ class KuberosExecuter(KubernetesExecuter):
                          namespace=namespace)
 
 
-    def deploy_disc_server(self,
-                            disc_server_list: list):
+    def deploy_disc_server(self, 
+                           disc_server_list: list) -> ExecutionResponse:
         """
         Deploy discovery server(s) for ONE robot.
         Primary server and a secondary (backup) server as optional.
@@ -581,66 +615,173 @@ class KuberosExecuter(KubernetesExecuter):
         #     'dds_services': svc['metadata']['name']}
 
 
-    def deploy_ros_modules(self,
-                           pod_list: list) -> ExecutionResponse:
+    def deploy_rosmodules(self,
+                           pod_list: list) -> dict:
         """
         Deploy a list of ROS modules in the cluster.
-        """
-        pod_name_list=[]
-        for pod in pod_list:
-            self.create_pod(pod_manifest=pod)
-            pod_name_list.append(pod['metadata']['name'])
-        return {'ros_pods': pod_name_list,
-                'namespace': self._ns}
         
-    def check_deployed_pod_status(self,
-                                  pod_list: list):
+        Args:
+            - pod_list: list of pod manifest dict.
+        """
+
+        pod_name_list=[]
 
         for pod in pod_list:
-            print(f"Check pod status: {pod['name']}")
-            check_res=self.check_pod_status(pod_name=pod['name'])
-            pod.update(check_res)
-        return pod_list
+            try: 
+                res = self.create_pod(pod_manifest=pod)
+                
+                if res['status'] == 'failed':
+                    return res
+                
+                pod_name_list.append(pod['metadata']['name'])
+
+            except Exception as exc:
+                # catch unknown exception 
+                logger.fatal("Failed to create pod: %s", pod['metadata']['name'])
+                logger.fatal(exc)
+                self._response.set_failed(
+                    reson='FailedToCreatePod',
+                    err_msg=str(exc),
+                )
+                return self._response.to_dict()
+        
+        self._response.set_data({
+            'ros_pods': pod_name_list,
+            'namespace': self._ns
+             })
+        self._response.set_success()
+        
+        return self._response.to_dict()
+
+
+    def check_deployed_pod_status(self,
+                                  pod_list: list) -> dict:
+        """
+        Get the status of the deployed pods.
+        """
+        try: 
+            for pod in pod_list:
+                logger.debug("Check pod status: %s", pod['name'])
+                check_res=self.check_pod_status(pod_name=pod['name'])
+                pod.update(check_res)
+            self._response.set_data(pod_list)
+            self._response.set_success()
+            return self._response.to_dict()
+        
+        except Exception as exc:
+            # catch unknown exception
+            logger.fatal("Failed to check pod status: %s", pod['name'])
+            self._response.set_failed(
+                reason='FailedToCheckPodStatus',
+                err_msg=str(exc),
+            )
+            return self._response.to_dict()   
+
 
     def check_deployed_svc_status(self,
-                                  svc_list: list,
-                                  ns='ros-default'):
-        for svc in svc_list:
-            print(f"Check svc status: {svc['name']}")
-            check_res=self.check_service_status(svc_name=svc['name'])
-            svc.update(check_res)
-        return svc_list
+                                  svc_list: list) -> dict:
+        """
+        Get the status of the deployed services.
+        """
+        try:
+            for svc in svc_list:
+                logger.debug("Check svc status: %s", svc['name'])
+                check_res=self.check_service_status(svc_name=svc['name'])
+                svc.update(check_res)
+            self._response.set_data(svc_list)
+            self._response.set_success()
+            return self._response.to_dict()
+        
+        except Exception as exc:
+            # catch unknown exception
+            logger.fatal("Failed to check svc status: %s", svc['name'])
+            self._response.set_failed(
+                reason='FailedToCheckSvcStatus',
+                err_msg=str(exc),
+            )
+            return self._response.to_dict()
 
+        
     def delete_rosmodules(self,
                           pod_list: list,
                           svc_list: list=[]) -> None:
-        for pod in pod_list:
-            self.delete_pod(pod_name=pod)
-        for svc in svc_list:
-            self.delete_service(svc_name=svc)
-
-
-
-    def create_configmaps(self,
-                         configmap_list) -> None:
         """
-        Create ConfigMaps in the list
+        Delete rosmodules in the cluster.
+        """
+        try:
+            for pod in pod_list:
+                self.delete_pod(pod_name=pod)
+            for svc in svc_list:
+                self.delete_service(svc_name=svc)
+            self._response.set_success()
+        except Exception as exc:
+            self._response.set_failed(
+                reason='FailedToDeletePod',
+                err_msg=str(exc),
+            )
+        return self._response.to_dict()
+
+    def deploy_configmaps(self,
+                         configmap_list: List[dict]) -> dict:
+        """
+        Create ConfigMaps from list 
+
+        Args: 
+            - configmap_list: list of configmap dict
         """
         for configmap in configmap_list:
-            self.create_configmap(
-                name=configmap['name'],
-                content=configmap['content'],
-            )
+            
+            try:
+                res = self.create_configmap(
+                    name=configmap['name'],
+                    content=configmap['content'],
+                )
+                if res['status'] == 'failed':
+                    # Retrurn the failure response and break the loop
+                    return res
+                self._response.set_data(res)
+                self._response.set_success()
 
-    def delete_configmaps(self,
-                          configmap_list) -> None:
+            except Exception as exc: 
+                # catch unknown exception
+                logger.fatal("Failed to create configmap: %s", configmap['name'])
+                logger.fatal(exc)
+                self._response.set_failed(
+                    reason='FailedToCreateConfigmap',
+                    err_msg=exc
+                )
+                # break the loop and return the failure response
+                return self._response.to_dict()
+
+        return self._response.to_dict()
+
+
+    def delete_deployed_configmaps(self,
+                          configmap_list) -> dict:
         """
         Delete all ConfigMaps in the list
         """
         for configmap in configmap_list:
-            self.delete_configmap(name=configmap['name'])
-
-
+            try:
+                res = self.delete_configmap(name=configmap['name'])
+                if res['status'] == 'failed':
+                    # Retrurn the failure response and break the loop
+                    return res
+                self._response.set_data(res)
+            except Exception as exc: 
+                logger.fatal("Failed to delete configmap: %s", configmap['name'])
+                logger.fatal(exc)
+                self._response.set_failed(
+                    reason='FailedToDeleteConfigmap',
+                    err_msg=exc
+                )
+                self._response.to_dict()
+        
+        # if no exception, set the response as success
+        self._response.set_success()
+        return self._response.to_dict()
+    
+    
     # # Container access token
     # def create_container_access_token(self,
     #                                   secret_name: str,
