@@ -519,7 +519,10 @@ class KubernetesExecuter():
                 namespace=self._ns,
                 body=configmap
             )
-            self._response.set_data(res)
+            
+            self._response.set_data(
+                self._kube_client.sanitize_for_serialization(res)
+            )
             self._response.set_success()
 
         except ApiException as exc:
@@ -543,9 +546,16 @@ class KubernetesExecuter():
                 namespace=self._ns,
                 name=name
             )
-            self._response.set_data(res)
-            self._response.set_success()
 
+            if res['status'] == 'Success': # snippet from response: {..., "status": "Success"}
+                self._response.set_data(res)
+                self._response.set_success()
+            else:
+                self._response.set_failed(
+                    reason='FailedToDeleteConfigmap',
+                    err_msg='Failed to delete configmap.'
+                )
+            
         except ApiException as exc:
             if exc.reason == 'Not Found':
                 # if the configmap is not found, set the response as success
