@@ -547,8 +547,12 @@ class KubernetesExecuter():
                 name=name
             )
 
-            if res['status'] == 'Success': # snippet from response: {..., "status": "Success"}
-                self._response.set_data(res)
+            print("x " * 20)
+            print(res)
+            
+            # check the response status
+            if res.status == 'Success': # snippet from response: {..., "status": "Success"}
+                self._response.set_data(self._kube_client.sanitize_for_serialization(res))
                 self._response.set_success()
             else:
                 self._response.set_failed(
@@ -561,7 +565,7 @@ class KubernetesExecuter():
                 # if the configmap is not found, set the response as success
                 self._response.set_success()
             else:
-                self._response.raise_api_exception_error(exc)
+                self._response.raise_api_exception_error(str(exc))
 
         return self._response.to_dict()
 
@@ -783,7 +787,7 @@ class KuberosExecuter(KubernetesExecuter):
                 logger.fatal(exc)
                 self._response.set_failed(
                     reason='FailedToDeleteConfigmap',
-                    err_msg=exc
+                    err_msg=str(exc)
                 )
                 self._response.to_dict()
         
