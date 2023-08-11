@@ -70,7 +70,7 @@ You can either read the content or use `scp` or similar command to copy the cert
 sudo cat /var/lib/rancher/k3s/server/tls/server-ca.crt
 ``` 
 
-**Service Account Token**
+**Service Account**
 Creating a service account with the Cluster Admin Role is similar to K8s. 
 ```bash
 # Create namespace 
@@ -78,14 +78,43 @@ kubectl create namespace kuberos
 
 # Create service account 
 kubectl -n kuberos create serviceaccount kuberos-admin-sa
+
+# Create cluster role binding
+kubectl create clusterrolebinding kuberos-admin-rolebinding -n kuberos --clusterrole=cluster-admin --serviceaccount=kuberos:kuberos-admin-sa
 ```
 
-This is the slight difference from K8s. The token is not automatically created for the service account. It maybe disabled by default or not supported in K3s. According to this [site](https://docs.k3s.io/installation/kube-dashboard), you can get the token by using the following command: 
+**Service Account Token (Long-lived)**
+Before K8s 1.24, creating a new service account creates a persistent token by default. Due to security and scalability concerns, no token is appended after 1.24. To create a long-lived service token, you can use:
 ```bash
-sudo k3s kubectl -n kuberos create token kuberos-admin-sa
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kuberos-admin-sa-token
+  namespace: kuberos
+  annotations:
+    kubernetes.io/service-account.name: kuberos-admin-sa
+type: kubernetes.io/service-account-token
+EOF
 ```
 
-Note that, the token cannot be retrieved with `kubectl get token -n kuberos` and cannot be displayed with `kubectl describe -n kuberos kuberos-admin-sa` 
+The token can be retrieved: 
+```bash
+kubectl describe secrets -n kuberos kuberos-admin-sa-token
+```
+
+**Service Account Token (time-bound)**
+Starting with version 1.22, Kubernetes introduced the `TokenRequest` API to generate a token that expires after one hour by default.
+```bash
+kubectl create token kuberos-admin-sa -n kuberos
+```
+
+In k3s, you can also get the token by using followng command: 
+```bash
+sudo k3s kubectl -n kuberos create token kuberos-admin-sa --duration=0s
+```
+
+Note that, the token created by this method, cannot be retrieved with `kubectl get token -n kuberos` and cannot be displayed with `kubectl describe -n kuberos kuberos-admin-sa` 
 ```bash
 Name:                kuberos-admin-sa
 Namespace:           kuberos
@@ -93,11 +122,11 @@ Labels:              <none>
 Annotations:         <none>
 Image pull secrets:  <none>
 Mountable secrets:   <none>
-Tokens:              <none>  # -> Usually, you will find the token name here in Kubernetes
+Tokens:              <none> 
 Events:              <none>
 ```
 
-To test it, you can use: 
+To **check** it, you can use: 
 ```bash
 API_SERVER_IP=<your-api-server-ip-addresse>
 TOKEN=your token from the steps above>
