@@ -87,6 +87,7 @@ class ClusterViewSet(viewsets.ViewSet):
         # check the validation
         if not serializer.is_valid():
             # return failed response
+            logger.error("Invalid data for cluster registration")
             logger.error(serializer.errors)
             response.set_failed(
                 reason='ValidationFailed',
