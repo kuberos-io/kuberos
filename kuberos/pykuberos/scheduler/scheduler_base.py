@@ -116,6 +116,7 @@ class RobotEntity():
                 node_selector_type='node',
                 container_image=module_mani.container_image,
                 entrypoint=module_mani.entrypoint,
+                source_ws=module_mani.source_ws,
                 )
             
             # Bind ConfigMap to container
@@ -206,6 +207,7 @@ class RobotEntity():
                 
                 container_image=module.container_image, 
                 entrypoint=module.entrypoint,
+                source_ws=module.source_ws,
                 )
             self.sc_edge_modules.append(sc_module)
             self.sc_edge.append(sc_module.get_kubernetes_manifest())

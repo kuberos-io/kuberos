@@ -9,7 +9,6 @@ from .rosparameter import RosParameterList
 logger = logging.getLogger('scheduler')
 
 
-# DEFAULT_DDS_IMAGE_URL = 'fogrobo.com:5050/kuberos/kuberos_examples/ros_basic_tutorials/humble-ros-core-jammy:latest'
 DEFAULT_DDS_IMAGE_URL = 'metagoto/ros2_dds_server:humble-v1'
 DEFAULT_IMAGE_PULL_SEC = 'kuberos-test-registry-token'
 DEFAULT_ROS_VERSION = 'humble'
@@ -35,6 +34,7 @@ class RosModule():
                  
                  container_image: dict, # from deployment request                  
                  entrypoint: list,
+                 source_ws: str = None,
                  
                  target: str = None, # target node name or resource group
                  resource_group = 'edge', # edge resource group
@@ -66,6 +66,8 @@ class RosModule():
         self.image_name = container_image['image_name']
         self.image_url = container_image['image_url']
         self.entrypoint = entrypoint
+        
+        self._source_ws = source_ws
         # self.requirements = module_manifest['requirements']
         
         # image registry
@@ -104,7 +106,7 @@ class RosModule():
         entrypoint = self.entrypoint[0] + ' ' + launch_args_str
         
         self.args = [f'source /opt/ros/{self._ros_version}/setup.bash',
-            'source /workspace/install/setup.bash',
+            f'source {self._source_ws}setup.bash',
             'export ROS_DISCOVERY_SERVER=${}:${}'.format(self.svc_env_host, self.svc_env_port), 
             entrypoint]
         

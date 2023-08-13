@@ -6,6 +6,9 @@ from .rosmodule import RosModule
 from .rosparameter import RosParameter, RosParamMap, RosParameterList 
 
 
+WORKSPACE_PATH_DEFAULT = '/workspace/install/'
+
+
 class DeploymentManifest(object):
     """
     KubeROS deployment manifest. 
@@ -232,6 +235,18 @@ class RosModuleManifest(object):
         Return the command that will be executed.
         """
         return self._module_mani['entrypoint']
+    
+    @property
+    def source_ws(self):
+        """
+        Return the path to the setup.bash
+        Format: /workspace/install/
+            with dash at the end
+        """
+        source_ws = self._module_mani.get('sourceWs', WORKSPACE_PATH_DEFAULT)
+        if not source_ws.endswith('/'):
+            source_ws += '/'
+        return source_ws
     
     def __repr__(self) -> str:
         return f'<RosModule: {self.name}>'
