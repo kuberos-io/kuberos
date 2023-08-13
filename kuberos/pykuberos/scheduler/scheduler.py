@@ -1,15 +1,23 @@
-# KubeROS default scheduler
-from typing import Optional
+"""
+KubeROS Scheduler to determine the best node for the rosmodules.
+"""
+
+# python
+import logging
 import json
 import ruamel.yaml 
 from ruamel.yaml import YAML, load, safe_load
-import copy
+from typing import Optional
 
+# Pykuberos
 from .scheduler_base import SchedulingMsgs, RobotEntity
 from .manifest import RosModuleManifest, DeploymentManifest
 from .rosparameter import RosParamMapList
 from .node import EdgeNodeGroup, FleetNode, NodeBase
 from .fleet import FleetState
+
+
+logger = logging.getLogger('scheduler')
 
 
 """
@@ -162,8 +170,8 @@ class KuberosScheduler(object):
            - network latency 
            - etc.
         """
-        
-        print("Initialize the scheduler")
+
+        logger.info("Initialize the scheduler")
         
         # print(deployment_manifest)
         # print(fleet_state)
@@ -184,7 +192,7 @@ class KuberosScheduler(object):
         self.robots = [] # list of robot entity objects
         self.sc_res = [] # scheduling result
         
-        print("Number of available edge nodes: {}".format(self._edge_state.num_of_ava_edge_nodes))
+        logger.info("[INIT] Number of available edge nodes: %s", self._edge_state.num_of_ava_edge_nodes)
         
         # schedule the rosmodules to the fleet nodes: 
         # self.schedule()
@@ -239,15 +247,15 @@ class KuberosScheduler(object):
             group_name = comp_groups[0], 
             robot_name = self.tar_rob_names)
         #print(nodes_state)
-        
+
         # add new robot to the scheduling result object
         for state in nodes_state:
             new_robot = RobotEntity(state)
             self.robots.append(new_robot)
-            print('Add new robot: {}'.format(new_robot.robot_name))
+            logger.info('[INIT] Add new robot: %s', new_robot.robot_name)
         return True 
-    
-            
+
+
     def bind_rosmodules_to_robots(self): 
         """ 
             Rename to: check_deployment_target
@@ -256,8 +264,6 @@ class KuberosScheduler(object):
         Return: 
             - fleet_node instance in the scheduling_result object            
         """
-        
-        
         
         # bind discovery server to the every fleet robot unit 
         self.init_robot_entities()
@@ -268,7 +274,8 @@ class KuberosScheduler(object):
             # bind to robots
             for rob in self.robots:
                 rob.bind_rosmodule(module_mani)
-                print("Bind rosmodule {} to robot {}".format(module_mani.name, rob.robot_name))
+                logger.info("[INIT] Bind rosmodule %s to robot %s", 
+                            module_mani.name, rob.robot_name)
 
         # TODO: Check the validity of the deployment request (rosmodules)    
         return True, ''

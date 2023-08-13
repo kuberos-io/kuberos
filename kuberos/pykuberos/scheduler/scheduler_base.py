@@ -1,10 +1,13 @@
 # python
+import logging
 from typing import Optional, List
 
 # Pykuberos
 from .rosmodule import RosModule, DiscoveryServer
 from .manifest import RosModuleManifest
 from .rosparameter import RosParamMapList
+
+logger = logging.getLogger('scheduler')
 
 
 class RobotEntity():
@@ -92,7 +95,8 @@ class RobotEntity():
         if len(err_msgs) > 0:
             return False, err_msgs
         
-        print("Check validity of onboard module [PASSED]")
+        logger.info("[Scheduling] Check validity of onboard module [PASSED]")
+        
         return True, ''
 
     def schedule_onboard_modules(self, 
@@ -124,25 +128,35 @@ class RobotEntity():
             # Find the custom rosparam from the RosParamMap 
             req_rosparam_list.match_rosparam_map_list(rosparam_maps)
 
+            # Find the required parameters
+            req_launch_param = module_mani.get_launch_param()
+            launch_rosparam_list = module_mani.get_launch_param_rosparam()
+            launch_dev_param_list = module_mani.get_launch_param_device()
+            
+            logger.debug("Required launch param: %s", req_launch_param)
+            
             
             for req_rosparam in req_rosparam_list.rosparam_list:
+                # Parameters from each RosParamMap are used in
+                #   - volume mount - yaml
+                #   - environment variables - key-value
+                #   - launch parameters - key-value
                 
                 req_rosparam.print()
                 
                 value_from = req_rosparam.value_from
-                print("Value from: ", value_from)
+                logger.debug("Value from: %s", value_from)
                 configmap = rosparam_maps.get_configmap_by_name(
                         param_map_name=value_from
                         )
-                print("CONFIGMAP: ", configmap)
+                logger.debug("CONFIGMAP: %s", configmap)
                 if configmap == {}:
                     # TODO: raise error
-                    return 'Error'
+                    pass
                 
                 if req_rosparam.type == 'yaml':
                     # attach the configmap to scheduled ros module and 
                     # mount the configmap to the container
-                    
                     sc_module.attach_configmap_yaml(configmap_name=configmap.get('name'),
                                                     mount_path=req_rosparam.mount_path)
                     
@@ -150,20 +164,16 @@ class RobotEntity():
                     # Placeholder
                     # Currently, we use the key-value type to get the launch parameters
                     # In the future, we plan to support dynamically setting the ros parameters through configmap
-                    # TODO 
-                    pass 
-            
-            # Find the required parameters
-            req_launch_param = module_mani.get_launch_param()
-            print("Required launch param: ", req_launch_param)
-            launch_rosparam_list = module_mani.get_launch_param_rosparam()
-            launch_dev_param_list = module_mani.get_launch_param_device()
+                    sc_module.attach_configmap_key_value_v2(
+                        configmap=configmap,
+                        launch_param_list=launch_rosparam_list,
+                    )
             
             # bind the rosparam from the configmap 
-            sc_module.attach_configmap_key_value(
-                rosparam_list = req_rosparam_list,
-                launch_param_list = launch_rosparam_list, 
-            )
+            # sc_module.attach_configmap_key_value(
+            #     rosparam_list = req_rosparam_list,
+            #     launch_param_list = launch_rosparam_list, 
+            # )
             
             # bind the device parameter from the fleet state
             sc_module.insert_device_params(
@@ -171,12 +181,13 @@ class RobotEntity():
                 onboard_node_state = self._node_state
             )
             
-            print(sc_module.ros_launch_args)
-            print(sc_module.entrypoint)
+            logger.debug("[Scheduling] ROS launch args: %s", sc_module.ros_launch_args)
+            logger.debug("[Scheduling] Entry point: %s", sc_module.entrypoint)
             
             self.sc_onboard_modules.append(sc_module)
             self.sc_onboard.append(sc_module.get_kubernetes_manifest())
             # print(sc_module.print_pod_svc())
+            
         return self.sc_onboard
 
         
@@ -205,15 +216,16 @@ class RobotEntity():
             self.sc_edge.append(sc_module.get_kubernetes_manifest())
             # print(sc_module.print_pod_svc())
         return self.sc_edge
-    
+
+
     @property
     def onboard_primary_node_name(self):
         """
         Return the hostname of the primary onboard computer. 
-        
         """
         return self.hostname
-    
+
+
     def get_sc_modules(self):
         """
         Return all kubernetes pod and service manifests of the scheduled modules.

@@ -1,11 +1,16 @@
-# python 
+# python
+import logging
 import json
 
 # pykuberos
 from .rosparameter import RosParameterList
 
 
-DEFAULT_DDS_IMAGE_URL = 'fogrobo.com:5050/kuberos/kuberos_examples/ros_basic_tutorials/humble-ros-core-jammy:latest'
+logger = logging.getLogger('scheduler')
+
+
+# DEFAULT_DDS_IMAGE_URL = 'fogrobo.com:5050/kuberos/kuberos_examples/ros_basic_tutorials/humble-ros-core-jammy:latest'
+DEFAULT_DDS_IMAGE_URL = 'metagoto/ros2_dds_server:humble-v1'
 DEFAULT_IMAGE_PULL_SEC = 'kuberos-test-registry-token'
 DEFAULT_ROS_VERSION = 'humble'
 DEFAULT_CONTAINER_RESTART_POLICY = 'Never'
@@ -119,7 +124,7 @@ class RosModule():
                 'containers': [{
                     'image': self.image_url,
                     'name': self.image_name,
-                    # 'imagePullPolicy': 'Always',
+                    'imagePullPolicy': 'Always',
                     'command': ["/bin/bash"],
                     'args': ['-c', ';'.join(self.args)],
                     'ports': [{
@@ -167,7 +172,55 @@ class RosModule():
         # print("Attaching configmap from yaml file ")
         # print(self.volumes)
         # print(self.volume_mounts)
+    
+    def attach_configmap_key_value_v2(self,
+                                    configmap: dict,
+                                    launch_param_list):
+        """
+        Attach a configmap to get the args for the container entrypoint
+        TODO: Check the wether the namespace match the configmap name! 
+        """
         
+        logger.debug("[Scheduling - Rosmodule] Parsing the values from key-value pair RosParam to the container")
+        
+        launch_param_dict = {item['param']: item for item in launch_param_list}
+        
+        for key, val in configmap['content'].items():
+            
+            # Parameter used as launch args
+            if key in launch_param_dict:
+                
+                arg_name_in_configmap = '{}-{}'.format(configmap['name'].upper(), 
+                                                       launch_param_dict[key]['key'].upper().replace('_', '-'))
+
+                self.env.append({
+                'name': arg_name_in_configmap,
+                'valueFrom': {
+                    'configMapKeyRef': {
+                        'name': configmap['name'],
+                        'key': launch_param_dict[key]['key']
+                    }
+                }
+                })
+                
+                self.ros_launch_args.append({
+                    'arg_name': launch_param_dict[key]['param'],
+                    'arg_value': '$({})'.format(arg_name_in_configmap)
+                })
+            
+            # environment variables
+            else:
+                self.env.append({
+                'name': key,
+                'valueFrom': {
+                    'configMapKeyRef': {
+                        'name': configmap['name'],
+                        'key': key
+                    }
+                }
+                })
+
+
     def attach_configmap_key_value(self,
                                     rosparam_list: RosParameterList,
                                     launch_param_list):
@@ -190,7 +243,7 @@ class RosModule():
             rosparam_map_name = launch_param['namespace']
             configmap = rosparam_list.get_configmap_by_name(rosparam_map_name)
             print("Y" * 10, configmap)
-            
+            # TODO: Check if the configmap is None
             arg_name_in_configmap = '{}-{}'.format(configmap['name'].upper(), launch_param['key'].upper().replace('_', '-'))
             
             self.env.append({

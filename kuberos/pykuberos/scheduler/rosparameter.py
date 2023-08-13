@@ -6,7 +6,12 @@ This module contains two objects for parsing the ros parameter from deployment m
 """
 
 # python
+import logging
 from typing import Optional, List
+
+
+logger = logging.getLogger('scheduler')
+
 
 class RosParamMap():
     """
@@ -25,7 +30,9 @@ class RosParamMap():
         self.err_msgs = []
         self._ros_param_configmap = self.parse_ros_param_map(param_map=self._ros_param_map)
         
-        self.print()
+        logger.debug("[RosParamMap] - Loaded RosParamMap: %s \n %s", 
+                     self._ros_param_map['name'], 
+                     self._ros_param_configmap)
 
     def parse_ros_param_map(self,
                             param_map: dict) -> dict:
@@ -34,21 +41,27 @@ class RosParamMap():
         """
         ros_param_configmap = {}
         if param_map['type'] == 'yaml':
-            success, data, err_msg = self.load_ros_parameter_from_yaml(
-                param_map['path'])
-            if not success:
-                self.err_msgs.append(err_msg)
-                print(self.err_msgs)
-                content = ''
-            else:
-                content = {param_map['name']: data}
+            content = '' # to be replaced by the external yaml file
+            
+            # don't delete. Introduce the default yamlfile later.
+            # success, data, err_msg = self.load_ros_parameter_from_yaml(
+            #     param_map['path'])
+            # if not success:
+            #     self.err_msgs.append(err_msg)
+            #     print(self.err_msgs)
+            #     content = ''
+            # else:
+            #     content = {param_map['name']: data}
+        
         elif param_map['type'] == 'key-value':
             content = self.replace_boolean_for_configmap(
                 data=param_map['data'])
+        
         else:
             self.err_msgs.append(
                 "Unsupported rosParamMap type: {}".format(param_map['type']))
             content = ''
+            
         ros_param_configmap.update({
             'name': param_map['name'],
             'type': param_map['type'],
@@ -90,9 +103,11 @@ class RosParamMap():
         try:
             with open(path, 'r') as f:
                 ros_param_yaml = f.read()
+                logger.debug("Loaded ROS parameter from Yaml: {}".format(ros_param_yaml))
             return True, ros_param_yaml, ''
 
         except FileNotFoundError:
+            logger.error("Parameter file not found: %s", path)
             err_msgs.append("Parameter file not found: {}".format(path))
             return False, {}, err_msgs
 
@@ -132,7 +147,7 @@ class RosParamMapList():
 
         self._param_map_list = self.parse_ros_param_map(ros_param_map_list)
         self.err_msgs = []
-        self.print()
+        # self.print()
 
     def parse_ros_param_map(self, 
                             ros_param_map_list: list):
@@ -243,7 +258,7 @@ class RosParameter():
         """
         Print for debugging purpose
         """
-        print("[KubeROS ROS Parameter] - [Info] - Name: {}".format(self.name))
+        print("[RosParameter] - [Info] - Name: {}".format(self.name))
         print("  - type: {}".format(self.type))
         print("  - mountPath: {}".format(self.mount_path))
         print("  - valueFrom: {}".format(self.value_from))
