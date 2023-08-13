@@ -1,6 +1,11 @@
+"""
+Fleet state and node state objects
+"""
 
+# python
+import logging
 
-
+logger = logging.getLogger('scheduler')
 
 class NodeState(object):
     
@@ -12,7 +17,9 @@ class NodeState(object):
         self._node_state = fleet_node_state
         self._peripheral_devices = self.parse_peripheral_devices()
         
-        print("Peripheral devices: {}".format(self._peripheral_devices))
+        logger.debug("[NodeState] Node <%s> Mounted peripheral devices in node: %s", 
+                     self.hostname,
+                     self._peripheral_devices)
         
     @property
     def hostname(self):
@@ -194,9 +201,7 @@ class FleetState(object):
     def get_available_onboard_computer_group(self):
         return self.node_group.keys()
     
-        
-    
-                
+
     def get_schedulings_node_list(self, 
                                     req_comp_group: str, 
                                     req_comp_list: list):

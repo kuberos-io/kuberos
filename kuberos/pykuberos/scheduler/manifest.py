@@ -49,8 +49,7 @@ class DeploymentManifest(object):
         
         """
         return self._manifest.get('rosParamMap', [])
-    
-    
+
     @property
     def staticfile_map(self):
         """
