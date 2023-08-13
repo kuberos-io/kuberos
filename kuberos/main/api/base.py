@@ -55,11 +55,28 @@ class KuberosResponse():
         self._status = 'failed'
         self._add_error(reason, err_msg)
 
-    def set_success(self) -> None:
+    def set_success(self, 
+                    msg: str = None) -> None:
         """
         Set the response status as success.
         """
         self._status = 'success'
+        if msg: 
+            if not isinstance(msg, str):
+                raise ValueError("The msg must be a string.")
+            self._msgs.append(msg)
+
+    def set_accepted(self,
+                     msg: str = None) -> None:
+        """
+        Set the response status as accepted.
+        """
+        self._status = 'accepted'
+        if not isinstance(msg, str):
+            raise ValueError("The msg must be a string.")
+        if msg:
+            self._msgs.append(msg)
+
 
     def set_rejected(self,
                      reason: str,
@@ -70,6 +87,17 @@ class KuberosResponse():
         self._status = 'rejected'
         self._add_error(reason, err_msg)
 
+    def concatenate(self, other_response) -> None:
+        """
+        concatenate other response.
+        """
+        if not isinstance(other_response, KuberosResponse):
+            raise ValueError("The other_response must be a KuberosResponse object.")
+
+        self._data.update(other_response.data)
+        self._errors.extend(other_response.errors)
+        self._msgs.extend(other_response.msgs)
+        
     def to_dict(self) -> dict:
         """
         Get the response as a dict.
@@ -80,3 +108,15 @@ class KuberosResponse():
             'errors': self._errors,
             'msgs': self._msgs
         }
+
+    @property
+    def data(self):
+        return self._data
+    
+    @property
+    def errors(self):
+        return self._errors
+    
+    @property
+    def msgs(self):
+        return self._msgs
