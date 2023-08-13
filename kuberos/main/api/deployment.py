@@ -59,10 +59,11 @@ class DeploymentViewSet(viewsets.ViewSet):
             response.set_data(serializer.data)
             response.set_success()
             return Response(response.to_dict(),
-                            status=status.HTTP_202_ACCEPTED)
+                            status=status.HTTP_200_OK)
         
         # return error msg, if the deployment does not exist
         except Deployment.DoesNotExist:
+            logger.warning(f'Deployment {deployment_name} does not exist')
             response.set_failed(
                 reason='DeploymentDoesNotExist',
                 err_msg=f'Deployment {deployment_name} does not exist'
@@ -99,7 +100,7 @@ class DeploymentAdminViewSet(viewsets.ViewSet):
 
         # deployment not found
         except Deployment.DoesNotExist:
-            logger.error(f'Deployment {deployment_name} does not exist')
+            logger.warning(f'Deployment {deployment_name} does not exist')
             response.set_failed(
                 reason='DeploymentDoesNotExist',
                 err_msg=f'Deployment {deployment_name} does not exist'
