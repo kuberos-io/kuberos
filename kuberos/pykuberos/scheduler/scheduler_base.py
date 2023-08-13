@@ -141,15 +141,16 @@ class RobotEntity():
                 #   - volume mount - yaml
                 #   - environment variables - key-value
                 #   - launch parameters - key-value
-                
-                req_rosparam.print()
-                
-                value_from = req_rosparam.value_from
-                logger.debug("Value from: %s", value_from)
+
                 configmap = rosparam_maps.get_configmap_by_name(
-                        param_map_name=value_from
+                        param_map_name=req_rosparam.value_from
                         )
-                logger.debug("CONFIGMAP: %s", configmap)
+        
+                logger.debug("[Scheduling] Attaching required rosparam: %s \n - Value from: %s \n - ConfigMap: %s", 
+                             req_rosparam.name,
+                             req_rosparam.value_from,
+                             configmap)
+                                
                 if configmap == {}:
                     # TODO: raise error
                     pass
@@ -168,12 +169,6 @@ class RobotEntity():
                         configmap=configmap,
                         launch_param_list=launch_rosparam_list,
                     )
-            
-            # bind the rosparam from the configmap 
-            # sc_module.attach_configmap_key_value(
-            #     rosparam_list = req_rosparam_list,
-            #     launch_param_list = launch_rosparam_list, 
-            # )
             
             # bind the device parameter from the fleet state
             sc_module.insert_device_params(

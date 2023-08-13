@@ -220,57 +220,14 @@ class RosModule():
                 }
                 })
 
-
-    def attach_configmap_key_value(self,
-                                    rosparam_list: RosParameterList,
-                                    launch_param_list):
-        """
-        Attach a configmap to get the args for the container entrypoint
-        TODO: Check the wether the namespace match the configmap name! 
-        """
-        print("Attaching configmap from key-value pair")
-        
-        
-        # get the name of ros param map
-        # then get the configmap name from the rosparam map
-        for launch_param in launch_param_list:
-            # rosparam_map_name = launch_param['namespace'].replace('_', '-')
-            print("X" * 100)
-            print(launch_param)
-            rosparam_list.print()
-            
-            # get rosparam map name 
-            rosparam_map_name = launch_param['namespace']
-            configmap = rosparam_list.get_configmap_by_name(rosparam_map_name)
-            print("Y" * 10, configmap)
-            # TODO: Check if the configmap is None
-            arg_name_in_configmap = '{}-{}'.format(configmap['name'].upper(), launch_param['key'].upper().replace('_', '-'))
-            
-            self.env.append({
-                'name': arg_name_in_configmap,
-                'valueFrom': {
-                    'configMapKeyRef': {
-                        'name': configmap['name'],
-                        'key': launch_param['key']
-                    }
-                }
-            })
-            
-            self.ros_launch_args.append({
-                'arg_name': launch_param['param'],
-                'arg_value': '$({})'.format(arg_name_in_configmap)
-            })
-            
-        print("Env: ")
-        print(self.env)
-        print(self.entrypoint)
         
     def insert_device_params(self,
                              launch_dev_param_list: list,
                              onboard_node_state: dict):
-        print("Inserting device params")
-        print(launch_dev_param_list)
-        print(onboard_node_state)
+
+        # print("Inserting device params")
+        # print(launch_dev_param_list)
+        # print(onboard_node_state)
         
         for dev_param in launch_dev_param_list: 
             dev_name = dev_param['namespace']
@@ -282,7 +239,7 @@ class RosModule():
                 'arg_value': value
             })
 
-            print(self.entrypoint)
+#             print(self.entrypoint)
             
     @staticmethod
     def find_device_params(dev_name: str, 
