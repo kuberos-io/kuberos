@@ -15,6 +15,8 @@ from urllib3.exceptions import MaxRetryError
 logger = logging.getLogger('pykuberos')
 
 
+DELETE_POD_GRACE_TIME_PERIOD = 10 # seconds
+
 
 class KubeConfig():
     """
@@ -398,6 +400,7 @@ class KubernetesExecuter():
             res = self._kube_core_api.delete_namespaced_pod(
                 namespace=self._ns,
                 name=pod_name,
+                grace_period_seconds=DELETE_POD_GRACE_TIME_PERIOD
             )
             self._response.set_data(res)
             self._response.set_success()
@@ -502,8 +505,7 @@ class KubernetesExecuter():
             - name: str - name of the configmap
             - content: dict - content of the configmap
         """
-        logger.debug("[Kube Client] Creating Configmap: %s", name)
-
+        
         configmap=client.V1ConfigMap(
             api_version='v1',
             kind='ConfigMap',
@@ -511,7 +513,7 @@ class KubernetesExecuter():
                 name=name,
                 namespace=self._ns
             ),
-            data=content
+            data=content, 
         )
 
         try:
@@ -526,6 +528,11 @@ class KubernetesExecuter():
             self._response.set_success()
 
         except ApiException as exc:
+            
+            logger.error("[KubeCient] - [FailedToCreateConfigMap] - %s", exc)
+            
+            logger.debug("[KubeCient] - Received content: %s", content)
+            
             self._response.raise_api_exception_error(exc)
 
         return self._response.to_dict()
@@ -547,8 +554,8 @@ class KubernetesExecuter():
                 name=name
             )
 
-            print("x " * 20)
-            print(res)
+            # print("x " * 20)
+            # print(res)
             
             # check the response status
             if res.status == 'Success': # snippet from response: {..., "status": "Success"}
