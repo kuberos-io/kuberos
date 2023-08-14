@@ -1,0 +1,16 @@
+[{
+    "hostname": "node2", 
+    "uuid": "8a8d2d92-8405-47a7-a09c-0252e62d9320", 
+    "shared_resource": true, 
+    "node_status": "ready", 
+    "cluster_node_state": {
+        "available": true, 
+        "device_group": null, 
+        "peripheral_devices": {}, 
+        "is_alive": true, 
+        "ready": true, 
+        "architecture": "amd64", 
+        "kubelet_version": "v1.25.6", 
+        "container_runtime_version": "containerd://1.6.15"
+    }        
+}]

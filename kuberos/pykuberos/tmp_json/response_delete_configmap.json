@@ -1,0 +1,22 @@
+{
+    "api_version": "v1",
+    "code": null,
+    "details": {
+        "causes": null,
+        "group": null,
+        "kind": "configmaps",
+        "name": "publisher-param.yaml",
+        "retry_after_seconds": null,
+        "uid": "946aba99-8a03-4b2b-af0b-482f83e63897"
+    },
+    "kind": "Status",
+    "message": null,
+    "metadata": {
+        "_continue": null,
+        "remaining_item_count": null,
+        "resource_version": null,
+        "self_link": null
+    },
+    "reason": null,
+    "status": "Success"
+}

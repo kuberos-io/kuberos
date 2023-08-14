@@ -1,0 +1,163 @@
+{ "status": { 
+    "conditions": [
+        {
+            "lastTransitionTime": "2023-07-22T23:00:25+00:00", 
+            "status": "True", 
+            "type": "Initialized"
+        }, 
+        {
+            "lastTransitionTime": "2023-07-22T23:00:30+00:00",
+            "status": "True", 
+            "type": "Ready"
+        }, 
+        {
+            "lastTransitionTime": 
+            "2023-07-22T23:00:30+00:00", 
+            "status": "True", 
+            "type": "ContainersReady"}, 
+        {
+            "lastTransitionTime": 
+            "2023-07-22T23:00:25+00:00", 
+            "status": "True", 
+            "type": "PodScheduled"}],
+"containerStatuses": [
+    {
+        "containerID": "docker://5cecdefa709c099e1aae456567e3a5af1a85b7b9e8af46efb32506ddb297c41b", 
+        "image": "/kuberos_examples/ros_basic_tutorials/humble-ros-core-jammy:latest", 
+        "imageID": "docker-pullable:///kuberos_examples/ros_basic_tutorials/humble-ros-core-jammy@sha256:4dc54da7afb688b0861c8a20d824f8b6a58898a88533efb316d2f98dd1de7483", 
+        "lastState": {}, 
+        "name": "dds-discovery-server", 
+        "ready": true, 
+        "restartCount": 0, 
+        "started": true, 
+        "state": {
+            "running": {
+                "startedAt": "2023-07-22T23:00:29+00:00"
+                }}}],
+"hostIP": "192.203.87.12",
+"phase": "Running",
+"podIP": "192.100.213.147",
+"podIPs": [{"ip": "192.100.213.147"}],
+"qosClass": "BestEffort",
+"startTime": "2023-07-22T23:00:25+00:00" },
+"spec": { 
+    "containers": [
+        {
+            "args": ["-c", "source /opt/ros/humble/setup.bash; fastdds discovery --server-id 0 --port 11811 -b"],
+
+"command": ["/bin/bash"],
+"image": "/kuberos_examples/ros_basic_tutorials/humble-ros-core-jammy:latest",
+"imagePullPolicy": "Always",
+"name": "dds-discovery-server",
+"ports": [{"containerPort": 11811, "protocol": "UDP"}],
+"resources": { },
+"terminationMessagePath": "/dev/termination-log",
+"terminationMessagePolicy": "File",
+"volumeMounts": [{"mountPath": "/var/run/secrets/kubernetes.io/serviceaccount", "name": "kube-api-access-hh47q", "readOnly": true}] } ],
+"dnsPolicy": "ClusterFirst",
+"enableServiceLinks": true,
+"imagePullSecrets": [{"name": "kuberos-test-registry-token"}],
+"nodeName": "k8s-sim-robot-1",
+"nodeSelector": { "device.kuberos.io/hostname": "k8s-sim-robot-1" },
+"preemptionPolicy": "PreemptLowerPriority",
+"priority": 0,
+"restartPolicy": "Never",
+"schedulerName": "default-scheduler",
+"securityContext": { },
+"serviceAccount": "default",
+"serviceAccountName": "default",
+"terminationGracePeriodSeconds": 30,
+
+"tolerations": [
+    {
+        "effect": "NoExecute", 
+        "key": "node.kubernetes.io/not-ready", 
+        "operator": "Exists", "tolerationSeconds": 300
+    }, 
+    {
+        "effect": "NoExecute", 
+        "key": "node.kubernetes.io/unreachable", 
+        "operator": "Exists", 
+        "tolerationSeconds": 300}
+],
+
+"volumes": [
+    {
+        "name": "kube-api-access-hh47q", 
+        "projected": {
+            "defaultMode": 420, 
+            "sources": [
+                {
+                    "serviceAccountToken": {
+                        "expirationSeconds": 3607, 
+                        "path": "token"}
+                    }, 
+                {"configMap": {
+                    "items": [{
+                        "key": "ca.crt", 
+                        "path": "ca.crt"}],
+    "name": "kube-root-ca.crt" } },
+{ "downwardAPI": { "items": [{"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.namespace"}, "path": "namespace"}] } } ] } } ] },
+"metadata": { 
+    "annotations": { 
+        "cni.projectcalico.org/containerID": "daf7f681051a16d143803a31e159f1f436e0eac2e0a7e17c861ad7b1a26a091f",
+        "cni.projectcalico.org/podIP": "192.100.213.147/32",
+        "cni.projectcalico.org/podIPs": "192.100.213.147/32" 
+    },
+    "creationTimestamp": "2023-07-22T23:00:25+00:00",
+    "labels": { 
+        "kuberos-robot": "simbot-1-primary-discovery-server",
+        "kuberos-role": "discovery-server" 
+    },
+    "managedFields": [
+        {
+            "apiVersion": "v1", 
+            "fieldsType": "FieldsV1", 
+            "fieldsV1": {
+                "f:metadata": {
+                    "f:labels": {".": {}, "f:kuberos-robot": {}, "f:kuberos-role": {}}}, 
+                    "f:spec": {"f:containers": {"k:{'name':'dds-discovery-server'}": {".": {}, "f:args": {}, "f:command": {}, "f:image": {}, "f:imagePullPolicy": {}, "f:name": {}, 
+                    "f:ports": {".": {}, "k:{'containerPort':11811,'protocol':'UDP'}": {".": {}, "f:containerPort": {}, "f:protocol": {}}}, 
+                    "f:resources": {}, 
+                    "f:terminationMessagePath": {}, 
+                    "f:terminationMessagePolicy": {}}}, 
+                    "f:dnsPolicy": {}, 
+                    "f:enableServiceLinks": {}, 
+                    "f:imagePullSecrets": {".": {}, "k:{'name':'kuberos-test-registry-token'}": {}}, 
+                    "f:nodeSelector": {}, 
+                    "f:restartPolicy": {}, 
+                    "f:schedulerName": {}, 
+                    "f:securityContext": {}, 
+                    "f:terminationGracePeriodSeconds": {}}},
+                "manager": "OpenAPI-Generator", 
+                "operation": "Update", 
+                "time": "2023-07-22T23:00:25+00:00"},
+        {
+            "apiVersion": "v1", 
+            "fieldsType": "FieldsV1", 
+            "fieldsV1": {
+                "f:metadata": {
+                    "f:annotations": {".": {}, 
+                    "f:cni.projectcalico.org/containerID": {}, 
+                    "f:cni.projectcalico.org/podIP": {}, 
+                    "f:cni.projectcalico.org/podIPs": {}}}}, 
+                "manager": "calico", 
+                "operation": "Update", 
+                "subresource": "status", 
+                "time": "2023-07-22T23:00:27+00:00"}, 
+        {
+            "apiVersion": "v1", 
+            "fieldsType": "FieldsV1", 
+            "fieldsV1": {
+                "f:status": {
+                    "f:conditions": {"k:{"type":"ContainersReady"}": {".": {}, 
+                    "f:lastProbeTime": {}, 
+                    "f:lastTransitionTime": {}, 
+                    "f:status": {}, 
+                    "f:type": {}}, 
+                    "k:{"type":"Initialized"}": {".": {}, "f:lastProbeTime": {}, "f:lastTransitionTime": {}, "f:status": {}, "f:type": {}}, "k:{"type":"Ready"}": {".": {}, "f:lastProbeTime": {}, "f:lastTransitionTime": {}, "f:status": {}, "f:type": {}}}, "f:containerStatuses": {}, "f:hostIP": {}, "f:phase": {}, "f:podIP": {}, "f:podIPs": {".": {}, "k:{"ip":"192.100.213.147"}": {".": {}, "f:ip": {}}}, "f:startTime": {}}}, "manager": "kubelet", "operation": "Update", "subresource": "status", "time": "2023-07-22T23:00:30+00:00"}],
+    "name": "simbot-1-primary-discovery-server",
+    "namespace": "ros-default",
+    "resourceVersion": "79754130",
+    "uid": "7d9869a6-da95-4fe7-9e2d-a369bce9da0f" },
+    "err_msg": null }

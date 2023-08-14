@@ -1,0 +1,26 @@
+{ "fleet_name": "fleet-0",
+"uuid": "f97417ff-3195-4201-9b59-b8a0b03af6ce",
+"active": true,
+"deployable": true,
+"main_cluster_name": "test-prod-cluster-1",
+"fleet_node_state_list": [{
+    "hostname": "node1", 
+    "uuid": "ca31dd0e-6214-4308-8f00-d47e2816cfcc", 
+    "robot_id": "1", 
+    "robot_name": "sim-robot-1", 
+    "onboard_comp_group": "ur5-control-pc-sim", 
+    "shared_resource": false, 
+    "node_status": "deployable", 
+    "cluster_node_state": {
+        "available": false, 
+        "computer_group": "ur5-control-pc-sim", 
+        "peripheral_devices": [{
+            "deviceName": "kuka-kr3-eki", 
+            "parameter": {
+                "robot-ip": "10.181.116.10"
+     } } ],
+"is_alive": true,
+"ready": "true",
+"architecture": "amd64",
+"kubelet_version": "v1.25.6",
+"container_runtime_version": "containerd://1.6.15" } } ] }
