@@ -15,34 +15,35 @@ class RobotEntity():
     A robot can have multiple onboard computers.
     For simple deployment, we assume that there is only one onboard computer.
     """
-    
+
     def __init__(self, node_state) -> None:
         """
         node_state: dict - the node state of the primary node of the robot.
         """
-        
+
         self._robot_name = node_state['robot_name']
         self.robot_id = node_state['robot_id']
         self.hostname = node_state['hostname']
         self.robot_primary_node_name = node_state['hostname']
         self._node_state = node_state
-        
+
         self.onboard_module_mani = [] # List of RosModuleManifest
         self.edge_module_mani = []
-        
+
         self.sc_onboard_modules = [] # list of scheduled RosModule instance
         self.sc_edge_modules = [] # list of scheduled RosModule instance
-        
+
         self.sc_onboard = []
         self.sc_edge = []
-        
+
+
     def schedule_primary_discovery_server(self) -> None:
         """
-        Bind a default discovery server to the primary node. 
+        Bind a default discovery server to the primary node.
         """
         self.primary_discovery_server = DiscoveryServer(
             name = f'{self._robot_name}-primary-discovery-server',
-            port = 11311, 
+            port = 11311,
             target_node = self.robot_primary_node_name)
         self.pri_disc_svc_name = self.primary_discovery_server.discovery_svc_name
 
@@ -82,15 +83,15 @@ class RobotEntity():
         node_peri_dev_list = node_state['cluster_node_state']['peripheral_devices']
         for mani in self.onboard_module_mani:
             req_dev_list = mani.peripheral_devices
-            for req_dev in req_dev_list: 
+            for req_dev in req_dev_list:
                 if req_dev not in node_peri_dev_list:
                     err_msgs.append(f'Required peripheral device {req_dev} is not available on the node {self.robot_primary_node_name}')
         
-        # check the cpu architecture 
+        # check the cpu architecture
         
-        # check the container runtime 
+        # check the container runtime
         
-        # check the nvidia gpu 
+        # check the nvidia gpu
         
         if len(err_msgs) > 0:
             return False, err_msgs
@@ -99,10 +100,73 @@ class RobotEntity():
         
         return True, ''
 
-    def schedule_onboard_modules(self, 
+
+    def _attach_required_rosparameter_and_env_var(self,
+                                                  scheduled_module: RosModule,
+                                                  module_manifest,
+                                                  rosparam_maps: RosParamMapList) -> None:
+        """
+        Attach required ROS parameters to the scheduled module.
+
+        :param scheduled_module: The ROS module scheduled to be attached.
+        :param module_manifest: ROS module manifest.
+        :param rosparam_maps: List containing ROS parameter maps.
+        """
+
+        # Get the required rosparameters from ROSModuleManifest
+        req_rosparam_list = module_manifest.get_rosparam_list()
+        # Match the corresponding RosParamMap
+        # Find the custom rosparam from the RosParamMap
+        req_rosparam_list.match_rosparam_map_list(rosparam_maps)
+
+        # Get the required ros2 launch args
+        req_launch_param = module_manifest.get_launch_param()
+        launch_rosparam_list = module_manifest.get_launch_param_rosparam()
+
+        logger.debug("Required launch param: %s", req_launch_param)
+
+        # Loop to attach parameters from the manifest to the scheduled module
+        # Parameters from each RosParamMap are used in
+        #   - volume mount - yaml
+        #   - environment variables - key-value
+        #   - launch parameters - key-value
+        for req_rosparam in req_rosparam_list.rosparam_list:
+
+            # get configmap
+            configmap = rosparam_maps.get_configmap_by_name(
+                    param_map_name=req_rosparam.value_from
+                    )
+
+            logger.debug("[Scheduling] Attaching required rosparam: %s \n - Value from: %s \n - ConfigMap: %s", 
+                            req_rosparam.name,
+                            req_rosparam.value_from,
+                            configmap)
+                            
+            if configmap == {}:
+                # TODO: raise error
+                logger.error("[Scheduling] RosParam <%s> Configmap is empty", 
+                                req_rosparam.name)
+            
+            if req_rosparam.type == 'yaml':
+                # attach the configmap to scheduled ros module
+                # mount the configmap to the container
+                scheduled_module.attach_configmap_yaml(configmap_name=configmap.get('name'),
+                                                mount_path=req_rosparam.mount_path)
+                
+            if req_rosparam.type == 'key-value':
+                # add ENV variables with valueFrom - configMapKeyRef
+                # append the launch parameters with arg_value from the configmap
+                # TODO support dynamically setting the ros parameters through configmap
+                scheduled_module.attach_configmap_key_value(
+                    configmap=configmap,
+                    launch_param_list=launch_rosparam_list,
+                )
+    
+
+    def schedule_onboard_modules(self,
                                  rosparam_maps: RosParamMapList) -> list:
         """
-        Schedule the onboard modules to the primary node. 
+        Schedule the onboard modules to the primary node.
         """
         for module_mani in self.onboard_module_mani:
             
@@ -119,74 +183,31 @@ class RobotEntity():
                 source_ws=module_mani.source_ws,
                 )
             
-            # Bind ConfigMap to container
-            # Load the required rosparameters from the RosParamMapList to the ConfigMap
-            # and attach the configmap to the scheduled ros_module
+            # Attach ros parameters and environment variables
+            self._attach_required_rosparameter_and_env_var(
+                scheduled_module=sc_module,
+                module_manifest=module_mani,
+                rosparam_maps=rosparam_maps
+            )
             
-            # Get the required rosparameters from ROSModuleManifest
-            req_rosparam_list = module_mani.get_rosparam_list()
-            # Match the corresponding rosparam map
-            # Find the custom rosparam from the RosParamMap 
-            req_rosparam_list.match_rosparam_map_list(rosparam_maps)
-
-            # Find the required parameters
-            req_launch_param = module_mani.get_launch_param()
-            launch_rosparam_list = module_mani.get_launch_param_rosparam()
+            # Add the device parameter from the fleet state
             launch_dev_param_list = module_mani.get_launch_param_device()
-            
-            logger.debug("Required launch param: %s", req_launch_param)
-            
-            
-            for req_rosparam in req_rosparam_list.rosparam_list:
-                # Parameters from each RosParamMap are used in
-                #   - volume mount - yaml
-                #   - environment variables - key-value
-                #   - launch parameters - key-value
-
-                configmap = rosparam_maps.get_configmap_by_name(
-                        param_map_name=req_rosparam.value_from
-                        )
-        
-                logger.debug("[Scheduling] Attaching required rosparam: %s \n - Value from: %s \n - ConfigMap: %s", 
-                             req_rosparam.name,
-                             req_rosparam.value_from,
-                             configmap)
-                                
-                if configmap == {}:
-                    # TODO: raise error
-                    pass
-                
-                if req_rosparam.type == 'yaml':
-                    # attach the configmap to scheduled ros module and 
-                    # mount the configmap to the container
-                    sc_module.attach_configmap_yaml(configmap_name=configmap.get('name'),
-                                                    mount_path=req_rosparam.mount_path)
-                    
-                if req_rosparam.type == 'key-value':
-                    # Placeholder
-                    # Currently, we use the key-value type to get the launch parameters
-                    # In the future, we plan to support dynamically setting the ros parameters through configmap
-                    sc_module.attach_configmap_key_value_v2(
-                        configmap=configmap,
-                        launch_param_list=launch_rosparam_list,
-                    )
-            
-            # bind the device parameter from the fleet state
             sc_module.insert_device_params(
                 launch_dev_param_list = launch_dev_param_list,
                 onboard_node_state = self._node_state
             )
             
-            logger.debug("[Scheduling] ROS launch args: %s", sc_module.ros_launch_args)
-            logger.debug("[Scheduling] Entry point: %s", sc_module.entrypoint)
-            
+            # Add the rosmodule to the scheduled list
             self.sc_onboard_modules.append(sc_module)
             self.sc_onboard.append(sc_module.get_kubernetes_manifest())
-            # print(sc_module.print_pod_svc())
             
+            logger.debug("[Scheduling] ROS launch args: %s", sc_module.ros_launch_args)
+            logger.debug("[Scheduling] Entry point: %s", sc_module.entrypoint)
+            # print(sc_module.print_pod_svc())
+
         return self.sc_onboard
 
-        
+
     def schedule_edge_modules(self, 
                               rosparam_maps: RosParamMapList):
         """
@@ -196,22 +217,30 @@ class RobotEntity():
         If the requirement is not fulfilled, reschedule 
         the edge modules to the onboard computers. 
         """
-        for module in self.edge_module_mani:
-            pod_name = f'{self._robot_name}-{module.name}'
-            # target_node = self.robot_primary_node_name
+        for module_mani in self.edge_module_mani:
+            
+            # Intitialize the pod
+            pod_name = f'{self._robot_name}-{module_mani.name}'
             sc_module = RosModule(
                 name=pod_name,
                 discovery_svc_name=self.pri_disc_svc_name,
-                # target=target_node,
-                node_selector_type='edge',
-                
-                container_image=module.container_image, 
-                entrypoint=module.entrypoint,
-                source_ws=module.source_ws,
+                node_selector_type='edge',      
+                container_image=module_mani.container_image, 
+                entrypoint=module_mani.entrypoint,
+                source_ws=module_mani.source_ws,
                 )
+            
+            # Attach ros parameters and environment variables
+            self._attach_required_rosparameter_and_env_var(
+                scheduled_module=sc_module,
+                module_manifest=module_mani,
+                rosparam_maps=rosparam_maps
+            )
+            
+            # Add the rosmodule to the scheduled list
             self.sc_edge_modules.append(sc_module)
             self.sc_edge.append(sc_module.get_kubernetes_manifest())
-            # print(sc_module.print_pod_svc())
+            
         return self.sc_edge
 
 

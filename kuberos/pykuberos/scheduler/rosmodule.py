@@ -174,8 +174,8 @@ class RosModule():
         # print("Attaching configmap from yaml file ")
         # print(self.volumes)
         # print(self.volume_mounts)
-    
-    def attach_configmap_key_value_v2(self,
+
+    def attach_configmap_key_value(self,
                                     configmap: dict,
                                     launch_param_list):
         """
