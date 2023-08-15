@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: postgresql-pv
+  labels:
+    type: local
+spec:
+  # storageClassName: manual
+  capacity:
+    storage: 10Gi # total capacity for this persistent volume
+  accessModes:
+    - ReadWriteOnce
+  hostPath: # where pesistent volume is created on the kubernetes node (needs to be /data for minikube)
+    path: "/home/iras-admin/kuberos-data/postgresql"
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: data-pv
+  labels:
+    type: local
+spec:
+  # storageClassName: manual
+  capacity:
+    storage: 5Gi # total capacity for this persistent volume
+  accessModes:
+    - ReadWriteMany
+  hostPath: # where pesistent volume is created on the kubernetes node (needs to be /data for minikube)
+    path: "/home/iras-admin/kuberos-data/data"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim #claim a portion of persistent volume
+metadata:
+  name: postgres-pv-claim
+  labels:
+    app: postgres
+spec:
+  # storageClassName: manual
+  accessModes:
+    - ReadWriteOnce # mount as read-write by a single node
+  resources:
+    requests:
+      storage: 2Gi # storage capacity consumed from the persistent volume
+---
+apiVersion: v1
+kind: PersistentVolumeClaim #claim a portion of persistent volume
+metadata:
+  name: data-pv-claim
+  labels:
+    app: kuberos
+spec:
+  # storageClassName: manual
+  accessModes:
+    - ReadWriteMany # mount as read-write by a single node
+  resources:
+    requests:
+      storage: 2Gi # storage capacity consumed from the persistent volume
