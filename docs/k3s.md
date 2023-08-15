@@ -128,9 +128,10 @@ Events:              <none>
 
 To **check** it, you can use: 
 ```bash
-API_SERVER_IP=<your-api-server-ip-addresse>
-TOKEN=your token from the steps above>
+export API_SERVER_IP=<your-api-server-ip-addresse>
+export TOKEN=your token from the steps above>
 curl -k -H "Authorization: Bearer $TOKEN" -X GET "https://$API_SERVER_IP:6443/api/v1/nodes" | json_pp
+echo $TOKEN #  # put this token in the KubeROS registration YAML
 ```
 
 Here is a link for further information to unserstand Kubernetes service accounts: *[Link](https://medium.com/@th3b3ginn3r/understanding-service-accounts-in-kubernetes-e9d2abe19df8)*
