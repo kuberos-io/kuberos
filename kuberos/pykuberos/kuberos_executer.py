@@ -577,6 +577,52 @@ class KubernetesExecuter():
         return self._response.to_dict()
 
 
+    def create_or_update_container_access_token(self,
+                                        secret_name: str,
+                                        docker_config_json: dict,
+                                        update: bool = False):
+        """
+        Create or update the container access token.
+        
+        Args:
+            - secret_name: name of the secret
+            - encoded_secret: base64 encoded string of the docker config file
+        """
+        secret = client.V1Secret(
+            api_version='v1',
+            kind='Secret',
+            metadata=client.V1ObjectMeta(name=secret_name),
+            type='kubernetes.io/dockerconfigjson',
+            data=docker_config_json
+        )
+        msg = ''
+        if update:
+            self._kube_core_api.delete_namespaced_secret(
+                name=secret_name,
+                namespace=self._ns,
+                body=client.V1DeleteOptions(
+                    propagation_policy="Foreground",
+                    # grace_period_seconds=5  # wait 5 seconds before deleting
+                )
+            )
+        
+        try:
+            res = self._kube_core_api.create_namespaced_secret(
+                namespace=self._ns,
+                body=secret
+                )
+            print(res)
+            msg = "Created container access token {}".format(secret_name)
+            print(msg)
+            return True, msg 
+        except ApiException as e:
+            print(e)
+            msg = "Error creating container access token {}".format(secret_name)
+            print (msg)
+            return False, msg
+
+
+
 class KuberosExecuter(KubernetesExecuter):
     """
         Interface to interact with Kubernetes cluster,
@@ -803,24 +849,3 @@ class KuberosExecuter(KubernetesExecuter):
         return self._response.to_dict()
     
     
-    # # Container access token
-    # def create_container_access_token(self,
-    #                                   secret_name: str,
-    #                                   encoded_secret: str):
-    #     """
-    #     Create container access token
-        
-    #     Args:
-    #         - secret_name: name of the secret
-    #         - encoded_secret: base64 encoded string of the docker config file
-    #     """
-    #     docker_config_jetson={
-    #         '.dockerconfigjson': encoded_secret
-    #     }
-    #     return self.create_container_access_token(secret_name, docker_config_jetson)
-
-
-
-    # def check_cluster_status(self):
-    #     success, msg=self.k8s_client.is_reachable()
-    #     return success, msg
