@@ -41,7 +41,7 @@ kubectl apply -f kuberos.yaml
  - Deploy Celery workers
 ```bash
 # replace nodeSelector
-kubectl apply - celery-workers.yaml
+kubectl apply -f celery-workers.yaml
 ```
 
 
