@@ -179,6 +179,8 @@ class RobotEntity():
                 target=target_node,
                 node_selector_type='node',
                 container_image=module_mani.container_image,
+                image_pull_secret=module_mani.container_registry['imagePullSecret'],
+                image_pull_policy=module_mani.container_registry['imagePullPolicy'],
                 entrypoint=module_mani.entrypoint,
                 source_ws=module_mani.source_ws,
                 )
@@ -225,7 +227,9 @@ class RobotEntity():
                 name=pod_name,
                 discovery_svc_name=self.pri_disc_svc_name,
                 node_selector_type='edge',      
-                container_image=module_mani.container_image, 
+                container_image=module_mani.container_image,
+                image_pull_secret=module_mani.container_registry['imagePullSecret'],
+                image_pull_policy=module_mani.container_registry['imagePullPolicy'],
                 entrypoint=module_mani.entrypoint,
                 source_ws=module_mani.source_ws,
                 )

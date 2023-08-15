@@ -19,7 +19,8 @@ class DeploymentManifest(object):
         self._manifest = manifest
         self._rosmodules_mani = []
         for module_mani in self._manifest['rosModules']:
-            self._rosmodules_mani.append(RosModuleManifest(module_mani))
+            self._rosmodules_mani.append(RosModuleManifest(module_mani, 
+                                                           container_registry_list=self.container_registry))
         
     @property
     def metadata(self) -> dict:
@@ -64,6 +65,32 @@ class DeploymentManifest(object):
                           hardware_specs: dict, 
                           configmap: dict):
         pass
+    
+    @property
+    def container_registry(self):
+        container_registry = self._manifest.get('containerRegistry', None)
+        if not container_registry:
+            return []
+        return container_registry
+    
+    def get_default_container_registry(self):
+        result = {
+                'imagePullSecret': '',
+                'imagePullPolicy': 'Always'
+            }
+        container_registry = self._manifest.get('containerRegistry', None)
+
+        if container_registry is None:
+            return result
+
+        # find the default container registry
+        for item in container_registry:
+            if item['name'] == 'default':
+                result['imagePullSecret'] = item['imagePullSecret']
+                result['imagePullPolicy'] = item['imagePullPolicy']
+
+        return result
+
 
     def __repr__(self) -> str:
         return f'<DeploymentManifest: {self.metadata["name"]}>'    
@@ -87,18 +114,55 @@ class RosModuleManifest(object):
     """
     
     def __init__(self, 
-                  rosmodule_manifest: dict) -> None:
+                  rosmodule_manifest: dict,
+                  container_registry_list: list) -> None:
         """
         Parse the rosmodule manifest.
         """
         self._module_mani = rosmodule_manifest
         self._requirements = self._module_mani.get('requirements', {})
         
+        self._container_registry = {
+            'imagePullSecret': '',
+            'imagePullPolicy': 'Always',
+        }
+        self._container_registry_list = container_registry_list
+        
         self._launch_param_list = self.parse_launch_param()
         
         # RosParameterList objects
         self._rosparam_list = self.parse_rosparam_from_manifest()
+        
+        # get container registry pull secret and policy
+        self._parse_container_registry()
     
+    def _parse_container_registry(self):
+        """
+        Get the container registry by name
+        """
+        req_container_registry = self._module_mani.get('containerRegistry', None)
+        
+        if not req_container_registry:
+            # use the default container registry
+            for item in self._container_registry_list:
+                if item['name'] == 'default':
+                    self._container_registry['imagePullSecret'] = item['imagePullSecret']
+                    self._container_registry['imagePullPolicy'] = item['imagePullPolicy']
+            return
+        
+        # find the required container registry
+        for item in self._container_registry_list:
+            if item['name'] == req_container_registry:
+                self._container_registry['imagePullSecret'] = item['imagePullSecret']
+                self._container_registry['imagePullPolicy'] = item['imagePullPolicy']
+            return
+        
+
+    @property
+    def container_registry(self):
+        return self._container_registry
+
+
     def parse_rosparam_from_manifest(self) -> RosParameterList:
         """
         Return the required ros parameters as a list of RosParameter objects.

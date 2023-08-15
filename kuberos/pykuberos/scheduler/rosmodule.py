@@ -9,8 +9,12 @@ from .rosparameter import RosParameterList
 logger = logging.getLogger('scheduler')
 
 
-DEFAULT_DDS_IMAGE_URL = 'metagoto/ros2_dds_server:humble-v1'
-DEFAULT_IMAGE_PULL_SEC = 'kuberos-test-registry-token'
+# DEFAULT_DDS_IMAGE_URL = 'metagoto/ros2_dds_server:humble-v1'
+DEFAULT_DDS_IMAGE_URL = 'metagoto/dds_introspection_node:humble-v1.1.1'
+# DEFAULT_IMAGE_PULL_SEC = 'kuberos-test-registry-token'
+# DEFAULT_IMAGE_PULL_SEC = 'kuberos-fogrobo-registry-token-test'
+DEFAULT_IMAGE_PULL_SEC = 'kuberos-fogrobo-registry-token-test-lala'
+
 DEFAULT_ROS_VERSION = 'humble'
 DEFAULT_CONTAINER_RESTART_POLICY = 'Never'
 
@@ -40,6 +44,7 @@ class RosModule():
                  resource_group = 'edge', # edge resource group
                  
                  image_pull_secret: str = None,
+                 image_pull_policy: str = 'Always', # Always|IfNotPresent|Never
                  node_selector_type: str = 'node',  # node|resource_group 
                  ros_version: str = DEFAULT_ROS_VERSION,
                  restart_policy: str = DEFAULT_CONTAINER_RESTART_POLICY,
@@ -74,6 +79,7 @@ class RosModule():
         self.image_pull_secret = DEFAULT_IMAGE_PULL_SEC if image_pull_secret is None else image_pull_secret
         self.ros_version = ros_version
         self.restart_policy = restart_policy
+        self._image_pull_policy = image_pull_policy
         
         self.svc_env_host = convert_string_to_linux_convention(self.discovery_svc_name) + '_SERVICE_HOST'
         self.svc_env_port = convert_string_to_linux_convention(self.discovery_svc_name) + '_SERVICE_PORT'
@@ -126,7 +132,7 @@ class RosModule():
                 'containers': [{
                     'image': self.image_url,
                     'name': self.image_name,
-                    'imagePullPolicy': 'Always',
+                    'imagePullPolicy': self._image_pull_policy,
                     'command': ["/bin/bash"],
                     'args': ['-c', ';'.join(self.args)],
                     'ports': [{
@@ -241,8 +247,7 @@ class RosModule():
                 'arg_value': value
             })
 
-#             print(self.entrypoint)
-            
+
     @staticmethod
     def find_device_params(dev_name: str, 
                            val_key: str,
@@ -296,6 +301,7 @@ class DiscoveryServer(object):
                  image_pull_secret: str = None,
                  image_url: str = None,
                  image_pull_policy: str = 'Always',
+                 add_env_for_introspection: bool = True, # TODO Review!
                  ) -> None:
         self._name = name
         self.port = port
@@ -316,6 +322,27 @@ class DiscoveryServer(object):
         self.target_port = 11811
         self.port_protocol = 'UDP'
         
+        self.env = []
+        if add_env_for_introspection:
+            self.set_env_for_introsprection()
+    
+    def set_env_for_introsprection(self):
+        """
+        Set the environment variables for introspection
+        """
+        self.env.append({
+            'name': 'DDS_DISCOVERY_SERVICE_NAME',
+            'value': convert_string_to_linux_convention(self.svc_name) + '_SERVICE_HOST'
+        })
+        self.env.append({
+            'name': 'DDS_DISCOVERY_PORT_NAME',
+            'value': convert_string_to_linux_convention(self.svc_name) + '_SERVICE_PORT'
+        })
+        self.env.append({
+            'name': 'FASTRTPS_DEFAULT_PROFILES_FILE', 
+            'value': '/dds_super_client_config.xml'
+        })
+  
     def set_target_node(self, node_name: str):
         self.target_node = node_name
     
@@ -361,8 +388,9 @@ class DiscoveryServer(object):
                     'ports': [{
                         'containerPort': self.target_port,
                         'protocol': self.port_protocol
-                        }]
-                    }],
+                        }],
+                    'env': self.env,
+                }],
                 'imagePullSecrets': [
                     {
                         'name': self.image_pull_secret        
