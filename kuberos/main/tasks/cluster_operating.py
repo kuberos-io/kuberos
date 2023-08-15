@@ -214,8 +214,9 @@ def sync_kubernetes_cluster(
 
 
 
-@shared_task(base=KubeROSBaseTask)
-def crud_container_access_token(
+# @shared_task(base=KubeROSBaseTask)
+@shared_task()
+def manage_container_access_token(
         cluster_config: dict,
         secret_name: str,
         action: str = 'get',
@@ -223,8 +224,7 @@ def crud_container_access_token(
         config_json: dict = None,
     ):
     """
-    CRUD container access token in Kubernetes cluster.
-    TODO: Rename to manage_container_access_token
+    manage container access token in Kubernetes cluster.
     """
     logger.debug("Celery Task - {} {} secret.".format(action, secret_name))
     kube_client = KubernetesClient(cluster_config)
