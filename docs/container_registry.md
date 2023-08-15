@@ -59,7 +59,7 @@ Currently, you need to tell KubeROS which Kubernetes cluster you want to use thi
 kuberos.py registry_token attach --cluster=<cluster-name-in-kuberos> --token=<token-name-in-kuberos>
 ```
 
-Before sending the request, you can check the `cluster-name' and `token-name' with the following commands:
+Before sending the request, you can check the `cluster-name` and `token-name` with the following commands:
 
 ```bash
 # check the token name

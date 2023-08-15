@@ -82,5 +82,5 @@ metadata:
   description: 'Short description'
   apiServer: https://<K8s-api-server-addresse>:6443
   caCert: ~/k8s_ca.crt # <path to cluster_ca.crt> # Change the corresponed path
-  serviceTokenAdmin: eyJhbGciOiJSUzI1NiIsImtxxxxxxxxxxx # Token from the steps about
+  serviceTokenAdmin: eyJhbGciOiJSUzI1NiIsImtxxxxxxxxxxx # Token from the steps above
 ```
