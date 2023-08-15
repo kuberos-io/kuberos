@@ -255,7 +255,7 @@ class KubernetesExecuter():
                     'name': item.metadata.name,
                     'labels': item.metadata.labels,
                     'status': self._kube_client.sanitize_for_serialization(item.status),
-                    'ready': self.check_node_readiness(item),
+                    'ready': self.check_node_readiness(item), # bool
                 }
                 nodes.append(node)
 
@@ -268,24 +268,26 @@ class KubernetesExecuter():
 
 
     @staticmethod
-    def check_node_readiness(node: dict) -> str:
+    def check_node_readiness(node: dict) -> bool:
         """
         Find the node readiness status from the node status conditions.
         """
         try:
             conditions = node.status.conditions
         except AttributeError:
-            return 'Unknown'
+            return False
 
         if conditions is None:
-            return 'Unknown'
+            return False
 
         for condition in conditions:
             if condition.type == 'Ready':
+                if condition.status == 'Unknown':
+                    return False
                 return condition.status
 
         # If no 'Ready' condition is found, return 'Unknown'
-        return 'Unknown'
+        return False
 
 
     def label_node(self,
