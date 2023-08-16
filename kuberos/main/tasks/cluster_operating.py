@@ -73,7 +73,7 @@ def update_cluster_node_labels(cluster_config: dict,
             # update failed
             logger.error("Celery Task - Update cluster node labels failed.")
             logger.error("Error: %s", response['errors'])
-            cluster_node.report_error(errors=response['errors'])
+            cluster_node.cluster.report_error(errors=response['errors'])
             ClusterSyncLog.log_sync_error(
                 cluster=cluster,
                 errors=response['errors']
