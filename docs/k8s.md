@@ -143,7 +143,7 @@ sudo systemctl enable containerd
 
 
 ### Install Kubeadm
-You will install following packages on all of your machines, more detail on [Kubernetes kubeadm v1.26](https://v1-26.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/)
+You will install following packages on all of your machines, more detail on [Kubernetes kubeadm v1.27](https://v1-27.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/)
 
  - **kubeadm**: the command to bootstrap the cluster.
 
