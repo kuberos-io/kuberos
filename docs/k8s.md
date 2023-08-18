@@ -219,6 +219,10 @@ Download the custom resources:
 curl https://raw.githubusercontent.com/projectcalico/calico/v3.25.1/manifests/custom-resources.yaml -O
 ```
 You can change the settings before applying them to the cluster.
+**IMPORTANT**: change encapsulation to VXLAN, otherwise unknown communication error by distributed ROS deployment
+```t
+encapsulation: VXLAN
+```
 ```bash
 kubectl create -f custom-resources.yaml
 ```
@@ -247,18 +251,23 @@ echo 'complete -o default -F __start_kubectl k' >>~/.bashrc
 
 
 ## Post-Setup for KubeROS
-
+The following information is required to add a new cluster to KubeROS 
+ - CA certificate 
+ - API server address
+ - Service account with cluster admin role (or namespace)
+ - Service account token
 
 ### Get Certificate and Service Token for KubeROS
 
 To grant KubeROS API to access the K3s API server, the server's CA certificate and a service account token that has enough permissions are required. 
 
 **CA cerfiticate**
-You can either read the content or use `scp` or similar command to copy the certificate. 
+You can either read the content or use `scp` or similar command to copy the certificate. If you are setting up the cluster through SSH, the easiest way is to copy the printed content to your local machine.
 ```bash
 sudo cat /etc/kubernetes/pki/ca.crt
 sudo cp /etc/kubernetes/pki/ca.crt ~/k8s_ca.crt # this file will be uploaded to KubeROS
-``` 
+```
+
 
 **Check Cluster Info**
 You can get and check the API server url using:
