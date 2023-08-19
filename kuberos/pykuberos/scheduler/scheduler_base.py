@@ -43,7 +43,7 @@ class RobotEntity():
         """
         self.primary_discovery_server = DiscoveryServer(
             name = f'{self._robot_name}-primary-discovery-server',
-            port = 11311,
+            port = 11811, # 11311
             target_node = self.robot_primary_node_name)
         self.pri_disc_svc_name = self.primary_discovery_server.discovery_svc_name
 
