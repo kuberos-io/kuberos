@@ -203,6 +203,11 @@ class Cluster(BaseTagModel):
         default=timezone.now
     )
     
+    resource_usage = models.JSONField(
+        blank=True,
+        null=True
+    )
+    
     class Meta:
         verbose_name = 'Cluster'
         verbose_name_plural = 'Clusters'
@@ -273,6 +278,31 @@ class Cluster(BaseTagModel):
         
         self.save()
 
+    def update_resource_usage(self, metrics: dict) -> None:
+        self.resource_usage = metrics
+        self.save()
+    
+    def get_node_allocable_state(self, use_robot=True) -> dict:
+        allocable_state = []
+        for node in self.cluster_node_set.all():
+            if node.kuberos_role == ClusterNode.ROLE_CHOICES.CONTROL_PLANE:
+                continue
+            if node.kuberos_role == ClusterNode.ROLE_CHOICES.ONBOARD:
+                if not use_robot:
+                    continue
+            allocable_state.append(node.get_allocable())
+        return allocable_state
+    
+    def get_cluster_resource_usage(self) -> dict:
+        """
+        Get the cluster resource usage
+        """
+        result = []
+        for node in self.cluster_node_set.all():
+            capacity = node.get_capacity()
+            cpu_usage = self.resource_usage['cpu']['usage']
+        return self.resource_usage
+    
     def get_cluster_node_uuid_list(self) -> list:
         """
         Get cluster node uuid list
@@ -581,6 +611,11 @@ class ClusterNode(BaseModel):
         help_text="Peripheral devices connected to the physical machine, such as camera, liard",
     )
 
+    resource_usage = models.JSONField(
+        null=True,
+        blank=True
+    )
+    
     # TOOD: network state for cloud nodes through VPN
 
 
@@ -614,6 +649,70 @@ class ClusterNode(BaseModel):
             return True
         else:
             return False
+
+    def get_allocatable(self) -> dict:
+        """
+        Get allocatable resources of the cluster node
+        """
+        result = {
+            'hostname': self.hostname,
+            'is_allocatable': True
+        }
+
+        try:
+            cap = self.get_capacity()
+            use = self.get_usage()
+            result['cpu'] = cap['cpu'] - use['cpu']
+            result['memory'] = cap['memory'] - use['memory']
+            result['storage'] = cap['storage'] - use['storage']
+            
+            if result['cpu'] < 0 or result['memory'] < 0 or result['storage'] < 0:
+                result['is_allocatable'] = False
+
+        except KeyError:
+            result['is_allocatable'] = False
+
+        return result
+
+    def get_capacity(self) -> dict:
+        """
+        Get the capacity of the cluster node
+        TODO: Review
+        """
+        try:
+            capacity = self.node_state['capacity']
+            return {
+                'cpu':  int(capacity['cpu']),
+                'memory': float(capacity['memory'].rstrip('Ki')) / 10 ** 6,
+                'storage': float(capacity['ephemeral-storage'].rstrip('Ki')) / 10 ** 6
+                }
+        except:
+            return {
+                'cpu': 0,
+                'memory': 0,
+                'storage': 0
+            }
+
+    def get_usage(self) -> dict:
+        """
+        Get the current resource usage
+        TODO: Review
+        """
+        try:
+            cpu = self.resource_usage['cpu']
+            memory = self.resource_usage['memory']
+            storage = self.node_state['allocatable']['ephemeral-storage']
+            return {
+                'cpu': float(cpu.rstrip('n')) / 10 ** 9,
+                'memory': float(memory.rstrip('Ki')) / 10 ** 6,
+                'storage': int(storage) / 10 ** 9,
+                }
+        except:
+            return {
+                'cpu': -1,
+                'memory': -1,
+                'storage': -1
+            }
 
     def get_current_fleet(self):
         fleet = self.cluster_node_set.all()
@@ -694,12 +793,16 @@ class ClusterNode(BaseModel):
         self.save()
 
 
-    def update_status(self, status) -> None:
+    def update_status(self,
+                      status: dict,
+                      resource_usage: dict = None) -> None:
         """
         Update the node status
         """
         self.node_state = status
         self.last_sync_time = timezone.now()
+        if resource_usage:
+            self.resource_usage = resource_usage
         self.save()
 
     def update_sync_timestamp(self) -> None:
@@ -891,7 +994,7 @@ class ContainerRegistryAccessToken(UserRelatedBaseModel):
         ]
 
     def __str__(self) -> str:
-        return _(self.name)
+        return str(self.name)
 
     def get_encode_docker_auth(self):
         """
