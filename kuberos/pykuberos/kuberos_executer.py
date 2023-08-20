@@ -622,6 +622,40 @@ class KubernetesExecuter():
             msg = "Error creating container access token {}".format(secret_name)
             print (msg)
             return False, msg
+    
+    def get_resource_usage(self):
+        """
+        Get nodes resource usage
+        via kubernetes state metrics server
+        TODO: Review and cleaning
+        """
+
+        # Connect to the CustomObjects API to fetch metrics
+        custom_api = client.CustomObjectsApi(self._kube_client)
+
+        # Define the API endpoint details
+        group = 'metrics.k8s.io'
+        version = 'v1beta1'
+        plural = 'nodes'
+        
+        try:
+            # Fetch metrics for all nodes
+            metrics = custom_api.list_cluster_custom_object(group, version, plural)
+            
+            # # Iterate over nodes and print CPU usage
+            # for item in metrics['items']:
+            #     node_name = item['metadata']['name']
+            #     cpu_usage_nano_cores = int(item['usage']['cpu'].rstrip('n'))
+            #     # cpu_usage_millicores = cpu_usage_nano_cores / 10**6
+            #     # print(f"Node: {node_name} - CPU Usage: {cpu_usage_millicores}")
+
+            self._response.set_data(metrics['items'])
+            self._response.set_success()
+        except ApiException as e:
+            print(e)
+            self._response.raise_api_exception_error(e)
+            
+        return self._response.to_dict()
 
 
 
