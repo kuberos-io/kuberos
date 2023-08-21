@@ -21,21 +21,42 @@ logger = logging.getLogger('scheduler')
 
 
 class JobScheduler():
+    """
+    Select the edge node for the job
+    """
     
     def __init__(self, 
                  deployment_manifest: dict,
-                 ec_state: dict) -> None:
+                 cluster_state: dict) -> None:
         """
         Initialize the KuberosScheduler
         param: deployment_manifest: dict - deployment manifest
-        param: ec_state: dict - the state of the edge or cloud nodes
+        param: cluster_state: dict - the cluster state for batch jobs
+            {
+                'cluster_name': 'kube', 
+                'nodes': [{
+                    'hostname': 'kube-edge-worker-02', 
+                    'is_allocatable': True, 
+                    'cpu': 3.968162422, 
+                    'memory': 6.118108, 
+                    'storage': 3.2684154680000006, 
+                    'num_pods': 0},
+                {
+                    'hostname': 'kube-simbot-02', 
+                    'is_allocatable': True, 
+                    'cpu': 3.9455201, 
+                    'memory': 5.321452000000001, 
+                    'storage': 3.1729054499999947, 
+                    'num_pods': 2}
+                    ]
+            }
         """
         
         self._deployment_manifest = DeploymentManifest(deployment_manifest)
         
         self._rosparam_maps = RosParamMapList(self._deployment_manifest.rosparam_map)
         
-        self._ec_state = ec_state
+        self._cluster_state = cluster_state
         
         self._disc_server = None
         
