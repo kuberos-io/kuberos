@@ -123,7 +123,8 @@ class SyncKubernetesClusterBaseTask(Task):
 
 @transaction.atomic
 def process_nodes(cluster: Cluster,
-                  kube_nodes: list):
+                  kube_nodes: list,
+                  resource_usage: dict = None):
     """
     Process all nodes returned from Kubernetes cluster. 
     
@@ -138,6 +139,14 @@ def process_nodes(cluster: Cluster,
     known_node_name_list = cluster.get_cluster_node_name_list()
     
     for node in kube_nodes:
+        
+        # find resource usage from list
+        node_usage = None
+        if resource_usage:
+            for item in resource_usage:
+                if node['name'] == item['metadata']['name']:
+                    node_usage = item['usage']
+            
         if node['name'] not in known_node_name_list:
             # add the new ndoe to the cluster in the database
             ClusterNode.objects.create(
@@ -145,7 +154,8 @@ def process_nodes(cluster: Cluster,
                 hostname=node['name'],
                 labels=node['labels'],
                 node_state=node['status'],
-                is_alive=node['ready']
+                is_alive=node['ready'],
+                resource_usage=node_usage,
             )
             logger.info("Add new node <%s> to cluster <%s>.",
                         {node['name']}, {cluster.cluster_name})
@@ -153,7 +163,8 @@ def process_nodes(cluster: Cluster,
         else:
             # update the node status
             kros_node = ClusterNode.objects.get(hostname=node['name'], cluster=cluster)
-            kros_node.update_status(node['status'])
+            kros_node.update_status(node['status'],
+                                    resource_usage=node_usage)
 
     # add log, if new nodes are found
     if len(new_nodes_name_list) > 0:
@@ -165,7 +176,9 @@ def process_nodes(cluster: Cluster,
 
 @shared_task
 def sync_kubernetes_cluster(
-    cluster_config: dict
+    cluster_config: dict,
+    get_usage: bool = False,
+    get_pods: bool = True,
 ) -> dict:
     """
     Synchronize the Kubernetes cluster with the KubeROS platform.
@@ -191,12 +204,23 @@ def sync_kubernetes_cluster(
 
     # connect to the cluster and get the node list
     kube_exec = KubernetesExecuter(cluster_config)
-    response = kube_exec.get_nodes_status()
-
+    response = kube_exec.get_nodes_status(get_namespaced_pods=get_pods)
+    
+    # get cluster resource usage
+    if get_usage:
+        resource_usage = kube_exec.get_resource_usage()
+        # if resource_usage['status'] == 'success':
+        #     cluster.update_resource_usage(resource_usage['data'])
+            
     if response['status'] == 'success':
         cluster.update_sync_timestamp()
         kube_nodes = response['data']
         # process nodes: add new node to the KubeROS and update node status
+        if get_usage:
+            if resource_usage['status'] == 'success':
+                process_nodes(cluster, 
+                              kube_nodes, 
+                              resource_usage=resource_usage['data'])
         process_nodes(cluster, kube_nodes)
 
     else:
@@ -210,6 +234,9 @@ def sync_kubernetes_cluster(
             cluster=cluster,
             errors=response['errors']
         )
+        
+    
+
     return response
 
 
