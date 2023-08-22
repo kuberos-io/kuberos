@@ -17,7 +17,8 @@ from main.models import (
     DeploymentEvent,
     DeploymentJob,
     BatchJobDeployment,
-    BatchJobUnit,
+    BatchJobGroup,
+    KuberosJob,
 )
 
 
@@ -119,17 +120,26 @@ class DeploymentAdmin(admin.ModelAdmin):
     )
     
 # Batch Jobs
-class BatchJobUnitAdminInline(StackedInline):
-    model = BatchJobUnit
+class BatchJobGroupAdminInline(StackedInline):
+    model = BatchJobGroup
     extra = 1
     
 @admin.register(BatchJobDeployment)
 class BatchJobDeploymentAdmin(admin.ModelAdmin):
     model = BatchJobDeployment
-    inlines = (BatchJobUnitAdminInline, )
+    inlines = (BatchJobGroupAdminInline, )
     readonly_fields = (
         'created_by',
     )
+
+class KuberosJobAdminInline(StackedInline):
+    model = KuberosJob
+    extra = 1
+
+@admin.register(BatchJobGroup)
+class BatchJobGroupAdmin(admin.ModelAdmin):
+    model = BatchJobGroup
+    inlines = (KuberosJobAdminInline, )
 
 # FleetHardwareOperationEvent    
 @admin.register(FleetHardwareOperationEvent)

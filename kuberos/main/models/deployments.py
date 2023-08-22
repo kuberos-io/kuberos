@@ -93,7 +93,7 @@ class Deployment(UserRelatedBaseModel):
         constraints = [
             models.UniqueConstraint(fields=['name'],
                                     condition=models.Q(active=True), 
-                                    name='unique_active_name_in_fleet')
+                                    name='unique_active_name')
         ]
         ordering = ['-created_time', 'name']
 
@@ -351,6 +351,7 @@ class DeploymentEvent(models.Model):
             self.deployment.update_status_as_failed()
             return True
 
+
 class DeploymentJob(models.Model):
     """
     The entire deployment is divided into jobs. 
@@ -375,25 +376,26 @@ class DeploymentJob(models.Model):
         # Job Terminator
         ('deploy_success', 'Deployment success'),
         ('deploy_failed', 'Deployment failed'),
+        ('job_completed', 'Job execution completed'),
         # Delete
         ('request_for_delete', 'Request for deleting deployment Job'),
         ('delete_in_progress', 'Delete in progress'),
         ('delete_failed', 'Delete failed'),
         ('delete_success', 'Delete success'),
     )
-    
+
     uuid = models.UUIDField(
         primary_key=True,
         editable=False, 
         unique=True, 
         default=uuid.uuid4
     )
-    
+
     robot_name = models.CharField(
         max_length=128,
         default='robot',
     )
-    
+
     disc_server = models.JSONField(
         null=True,
         blank=True,
@@ -656,6 +658,7 @@ class DeploymentJob(models.Model):
     def get_pod_list(self) -> list:
         """
         MAYBE DEPRECATED
+        USED in check_deployment_job_status
         Return the list of pods to check the status.
         """
         pod_list = []
@@ -696,7 +699,7 @@ class DeploymentJob(models.Model):
         try:
             for pod in self.pod_status:
                 if pod['pod_type'] == 'discovery_server':
-                    if pod['status'] != 'Running':
+                    if not pod['status'] in ['Running', 'Succeeded']:
                         return False
             return True
         except:

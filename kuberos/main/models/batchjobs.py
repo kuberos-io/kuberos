@@ -49,16 +49,27 @@ from main.models import Cluster
 class BatchJobDeployment(UserRelatedBaseModel):
     
     class StatusChoices(models.TextChoices):
-        
+
+        # Entire batch job deployment is in pending. Due to no cluster is free or available.
         PENDING = 'PENDING', _('pending')
-        PREPROCESSING = 'PREPROCESSING', _('preprocess and generate job queue')
-        PREPROCESS_SUCCESS = 'PREPROCESS_SUCCESS', _('job queue generated successfully')
-        PREPROCESS_FAILED = 'PREPROCESS_FAILED', _('failed to generate job queue')
-        EXECUTING = 'EXECUTING', _('execute batch jobs')
-        COMPLETED = 'COMPLETED', _('all jobs completed')
-        FAILED = 'FAILED', _('failure number execceed, check cluster')
-        DELETING = 'DELETING', _('aborted and in deleting')
-        DELETED = 'DELETED', _('deleted, jobs are not finished')
+        # Entire batch job deployment is in executing. This process may take a long time.
+        EXECUTING = 'EXECUTING', _('Batch jobs in executing')
+        
+        # Clearning the deployed global resources
+        #  - configmaps per job queue
+        #  - attached volumes.
+        CLEANING = 'CLEANING', _('Cleaning global resources')
+        
+        # Terminating state
+        # Completed, all jobs are completed or terminated if in failure.
+        COMPLETED = 'COMPLETED', _('Entire deployment completed')
+        # Failed. 
+        # Possible reasons: Manifest is not correct, failure rate is too high.
+        FAILED = 'FAILED', _('Batch jobs failed')
+        
+        # Archieve this deployment
+        ARCHIEVED = 'ARCHIEVED', _('archieved')
+
 
     name = models.CharField(
         max_length=128,
@@ -150,7 +161,20 @@ class BatchJobDeployment(UserRelatedBaseModel):
         
         return jobs_manifest
     
-    
+    def get_job_statistics(self):
+        queues = [group.job_statistics for group in self.batch_job_group_set.all()]
+        num_pending = 0
+        num_processing = 0
+        for queue in queues:
+            num_pending += queue['pending']
+            num_processing += queue['processing']
+        return {
+            'num_pending': num_pending,
+            'num_processing': num_processing,
+            'queues': queues
+        }
+        
+        
 class BatchJobGroup(models.Model):
     """
     Each batch job group is executed on a single cluster.
@@ -236,21 +260,53 @@ class BatchJobGroup(models.Model):
         
         return jobs_manifest
     
+    def get_pending_jobs_num(self) -> int:
+        return self.batch_kuberos_job_set.filter(job_status=KuberosJob.StatusChoices.PENDING).count()
+    
+    @property
+    def job_statistics(self) -> dict:
+        completed = self.batch_kuberos_job_set.filter(job_status=KuberosJob.StatusChoices.COMPLETED).count()
+        pending = self.batch_kuberos_job_set.filter(job_status=KuberosJob.StatusChoices.PENDING).count()
+        failed = self.batch_kuberos_job_set.filter(job_status=KuberosJob.StatusChoices.FAILED).count()
+        processing = self.batch_kuberos_job_set.all().count() - completed - pending - failed
+        return {
+            'queue_name': f'{self.group_postfix}',
+            'exec_cluster': f'{self.exec_cluster.cluster_name}',
+            'is_finished': True if processing == 0 else False,
+            'success': completed,
+            'pending': pending,
+            'failed': failed,
+            'processing': processing,
+        }
+        
+    
 
 class KuberosJob(models.Model):
     
     class StatusChoices(models.TextChoices):
         
+        # Job created, wait for scheduling to the cluster node
         PENDING = 'PENDING', _('pending')
+        # Job is scheduled to the cluster node
         SCHEDULED = 'SCHEDULED', _('scheduled')
-        PREPARING = 'PREPARING', _('preparing') # Configmap, dds, volume.
+        # Deploying discovery server, presets
+        PREPARING = 'PREPARING', _('preparing')
+        # Environment is prepared, wait to deploy the rosmodules
         PREPARED = 'PREPARED', _('prepared') # Configmap, dds, volume.
-        DEPLOYING = 'DEPLOYING', _('in deploying')
+        # Deploying rosmodules
+        DEPLOYING = 'DEPLOYING', _('deploying')
+        # Job is running
         RUNNING = 'RUNNING', _('running')
-        SUCCEED = 'SUCCEED', _('job completed sucessfully')
+        # Lifecycle module is finished
+        FINISHED = 'FINISHED', _('job finished')
+        # Job is finished, deleting the resources
+        TERMINATING = 'TERMINATING', _('in terminating')
+        
+        # Terminating state
+        # Change to completed after all resources are deleted
+        COMPLETED = 'COMPLETED', _('job executiong completed')
+        # Job failed
         FAILED = 'FAILED', _('job failed')
-        CLEANING = 'CLEANING', _('aborted and in deleting')
-        CLEANED = 'CLEANED', _('deleted, jobs are not finished')
     
     uuid = models.UUIDField(
         primary_key=True,
@@ -306,37 +362,7 @@ class KuberosJob(models.Model):
         verbose_name='scheduled rosmodules'
     )
     
-    scheduled_volume = models.JSONField(
-        null=True,
-        blank=True
-    )
-    
-    scheduled_configmaps = models.JSONField(
-        null=True,
-        blank=True
-    )
-    
     ### STATUS ###
-    configmaps_status = models.JSONField(
-        null=True,
-        blank=True
-    )
-    
-    volume_status = models.JSONField(
-        null=True,
-        blank=True
-    )
-    
-    disc_server_status = models.JSONField(
-        null=True,
-        blank=True
-    )
-    
-    rosmodules_status = models.JSONField(
-        null=True,
-        blank=True,
-    )
-    
     pod_status = models.JSONField(
         null=True,
         blank=True,
@@ -380,12 +406,16 @@ class KuberosJob(models.Model):
     job_msgs = models.JSONField(
         null=True,
         blank=True,
+        default=list,
     )
 
 
     def get_uuid(self) -> str:
         return str(self.uuid)
 
+    def add_error_msg(self, msg: str) -> None:
+        self.job_msgs.append({'error': msg})
+        # self.save()
 
     def update_scheduled_result(self, 
                                 sc_result: dict) -> None:
@@ -401,11 +431,6 @@ class KuberosJob(models.Model):
         
         # method copied, need to be refactored
         self.initialize()
-
-    def update_pod_status(self, 
-                          pod_status: list) -> None:
-        self.pod_status = pod_status
-        self.save()
 
     
     def get_job_description_for_scheduling(self) -> dict:
@@ -455,35 +480,25 @@ class KuberosJob(models.Model):
                           svc_status: list = []) -> str:
         
         self.last_check_time = timezone.now()
-        
         self.pod_status = pod_status
         self.svc_status = svc_status
-        
         self.save()
         
-        action = 'check'
-        
-        # print("Pod Status: ", self.pod_status)
-        print(self.job_status)
-        print(self.is_all_rosmodules_ready())
+        action = 'next'
         
         # check startup timeout
         if self.job_status in [self.StatusChoices.PREPARING, 
                                self.StatusChoices.DEPLOYING]:
             if (timezone.now() - self.scheduled_at).seconds > self.startup_timeout:
-                self.job_status = self.StatusChoices.FAILED
-                self.job_msgs = {'error': 'Job startup timeout'}
+                self.job_status = self.StatusChoices.FINISHED # Switch to terminate
+                self.add_error_msg('Job startup timeout')
                 self.save()
-                
-                action = 'next'
                 
         # check discovery server 
         if self.job_status == self.StatusChoices.PREPARING:
             if self.is_discovery_servers_ready():
                 self.job_status = self.StatusChoices.PREPARED
                 self.save()
-                
-                action = 'next'
                 
         # check rosmodules
         if self.job_status == self.StatusChoices.DEPLOYING:
@@ -492,53 +507,41 @@ class KuberosJob(models.Model):
                 self.job_status = self.StatusChoices.RUNNING
                 self.save()
 
-                action = 'next'
-                
         # check lifcycle module
         if self.job_status == self.StatusChoices.RUNNING:
-            
-            print("Checking lifecycle module")
-            
+
             # Running timeout
             if (timezone.now() - self.running_at).seconds > self.running_timeout:
-                self.job_status = self.StatusChoices.FAILED
-                self.job_msgs = {'error': 'Job timeout'}
+                self.job_status = self.StatusChoices.FINISHED
+                self.add_error_msg(f'Job startup timeout: {self.running_timeout} secs')
                 self.save()
-
-                action = 'next'
                 
-            # Lifecycle module completed
+            # Lifecycle module finished
             if self.is_lifecycle_module_completed():
-                self.job_status = self.StatusChoices.SUCCEED
+                self.job_status = self.StatusChoices.FINISHED
                 self.finished_at = timezone.now()
                 self.save()
-
-                action = 'next'
                 
             # Any rosmodules failed
             if self.is_any_rosmodules_failed():
                 self.job_status = self.StatusChoices.FAILED
                 self.job_msgs = {'error': 'ROS module failed'}
                 self.save()
-
-                action = 'next'
                 
-        # check deletion
-        if self.job_status == self.StatusChoices.CLEANING:
+        # check terminating status
+        if self.job_status == self.StatusChoices.TERMINATING:
             if self.is_all_modules_not_found():
-                self.job_status = self.StatusChoices.CLEANED
+                self.job_status = self.StatusChoices.COMPLETED
                 self.save()
                 
-                action = 'next'
-        
         return action
         
     def is_lifecycle_module_completed(self) -> bool:
         pod_name = f'{self.batch_job_group.group_postfix}-{self.batch_job_group.lifecycle_rosmodule_name}-{self.slug}'
-        print("lifecycle module pod name: ", pod_name)
+        # print("lifecycle module pod name: ", pod_name)
         for pod in self.pod_status:
             if pod['name'] == pod_name:
-                print("Lifecycly pod status: ", pod['status'])
+                # print("Lifecycly pod status: ", pod['status'])
                 if pod['status'] == 'Succeeded':
                     return True
         return False        
@@ -553,7 +556,7 @@ class KuberosJob(models.Model):
         try:
             for pod in self.pod_status:
                 if pod['pod_type'] == 'discovery_server':
-                    print("DDS STATUS: ", pod['status'])
+                    # print("DDS STATUS: ", pod['status'])
                     if not pod['status'] in ['Running', 'Succeeded']:
                         return False
             return True
@@ -564,7 +567,7 @@ class KuberosJob(models.Model):
         try: 
             for pod in self.pod_status:
                 if pod['pod_type'] in ['onboard_module', 'edge_module', 'cloud_module']:
-                    print("Pod Status: ", pod['status'])
+                    # print("Pod Status: ", pod['status'])
                     if pod['status'] != 'Running':
                         return False
             return True
@@ -575,7 +578,6 @@ class KuberosJob(models.Model):
         try:
             for pod in self.pod_status:
                 if pod['pod_type'] in ['onboard_module', 'edge_module', 'cloud_module']:
-                    print("Pod Status: ", pod['status'])
                     if pod['status'] == 'Failed':
                         return True
             return False

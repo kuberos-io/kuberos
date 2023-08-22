@@ -17,7 +17,6 @@ from pykuberos.kuberos_executer import KubernetesExecuter
 # Celery
 from celery import shared_task, Task
 from pykuberos.kubernetes_client import KubernetesClient
-from main.tasks.base import KubeROSBaseTask
 
 from main.models import Cluster, ClusterNode, ClusterSyncLog
 
@@ -121,7 +120,7 @@ class SyncKubernetesClusterBaseTask(Task):
 
 
 
-@transaction.atomic
+# @transaction.atomic
 def process_nodes(cluster: Cluster,
                   kube_nodes: list,
                   resource_usage: dict = None):

@@ -31,6 +31,11 @@ logger = logging.getLogger('kuberos.main.tasks')
 logger.propagate = False
 
 
+DEFAULT_JOB_CHECK_PERIOD = 5 # seconds
+
+DEFAULT_BATCH_JOB_SCHEDULING_PERIOD = 5 # seconds
+
+
 def replace_rosparam(dep_manifest: str,
                      rosparam_map_name: str,
                      param_name: str,
@@ -43,7 +48,7 @@ def replace_rosparam(dep_manifest: str,
     return replaced
 
 
-
+# Database operations
 def create_job_groups(
     batch_job_deployment: BatchJobDeployment):
     """
@@ -81,7 +86,7 @@ def create_job_groups(
 
         BatchJobGroup.objects.create(
             exec_cluster = exec_cluster_list[0],
-            group_postfix = get_random_string(length=8, allowed_chars='abcdefghijklmnopqrstuvwxyz0123456789'),
+            group_postfix = get_random_string(length=10, allowed_chars='abcdefghijklmnopqrstuvwxyz'),
             deployment = batch_job_deployment,
             deployment_manifest = job_dep_manifest,
             repeat_num = lifecycle_module.get('repeatNum', 1),
@@ -89,9 +94,10 @@ def create_job_groups(
         )
 
     return True
-    
 
-@transaction.atomic
+
+# Database operations
+# @transaction.atomic
 def create_kuberos_jobs(
     batch_job_group: BatchJobGroup
 ):
@@ -105,11 +111,26 @@ def create_kuberos_jobs(
             KuberosJob.objects.create(
                 batch_job_group = batch_job_group,
                 deployment_manifest = batch_job_group.deployment_manifest,
-                slug = f"{get_random_string(length=10, allowed_chars='abcdefghijklmnopqrstuvwxyz0123456789')}"
+                slug = f"{get_random_string(length=10, allowed_chars='abcdefghijklmnopqrstuvwxyz')}"
             )
             repeat_num -= 1
         except IntegrityError:
             continue
+
+# Database operations
+# @transaction.atomic
+def update_scheduling_result(scheduled_jobs: list) -> None:
+    """
+    Update the scheduling result to the database.
+    """
+    for job in scheduled_jobs:
+        logger.debug("[Update Scheduling Result] Job: %s", job['job_uuid'])
+        
+        job_obj = KuberosJob.objects.get(uuid=job['job_uuid'])
+        job_obj.update_scheduled_result(sc_result=job)
+
+
+
 
 
 @shared_task()
@@ -121,7 +142,7 @@ def generate_job_queues(
     Combination of varyingParameter and repeatModule. 
 
     """
-    logger.debug("[Batch Job] Generate job units")
+    logger.debug("[Batch Job] Generate job queues")
     
     batch_job_dep = BatchJobDeployment.objects.get(uuid=batch_job_dep_uuid)
     
@@ -142,24 +163,37 @@ def generate_job_queues(
         batch_job_group.configmaps = configmap_list
         batch_job_group.save()
         
+        # deploy configmaps
         response = kube_exec.deploy_configmaps(
             configmap_list=batch_job_group.get_configmaps()
         )
         
-        # Create single jobs
-        create_kuberos_jobs(batch_job_group=batch_job_group)
+        if response['status'] == 'success':
+            logger.debug("[Generate Job Queues] Reponse Configmaps: ", response['data'])
+
+            # Create single jobs
+            create_kuberos_jobs(batch_job_group=batch_job_group)
+
+            # switch the status to EXECUTING
+            batch_job_dep.status = BatchJobDeployment.StatusChoices.EXECUTING
+            batch_job_dep.save()
+            
+            # trigger check the whole process.
+            batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
+                                                       countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD * 2)
+            
+        else: 
+            logger.error("[Generate Job Queues] Failed to create configmaps")
+            logger.error(response['errors'])
+            batch_job_dep.status = BatchJobDeployment.StatusChoices.FAILED
+            batch_job_dep.save()
         
-    # switch the status to EXECUTING
-    batch_job_dep.status = BatchJobDeployment.StatusChoices.EXECUTING
-    batch_job_dep.save()
-    
-    # trigger check the whole process.
-    batch_job_deployment_controller.delay(batch_job_dep_uuid=batch_job_dep_uuid)
 
 
 
+# Change name to scheduling_batch_jobs
 @shared_task()
-def processing_batch_jobs(
+def scheduling_batch_jobs(
     batch_job_dep_uuid: str) -> None:
     """
     Check the current status of the batch jobs. 
@@ -171,28 +205,45 @@ def processing_batch_jobs(
     """
     
     batch_job_dep = BatchJobDeployment.objects.get(uuid=batch_job_dep_uuid)
-    
-    exec_cluser_list = batch_job_dep.exec_clusters.all()
+
+    logger.debug("[Scheduling Jobs] - %s ", batch_job_dep.name)
     
     # Scheduling new jobs:
     scheduled_clusters_name = []
+    
     for job_group in batch_job_dep.batch_job_group_set.all():
+        
+        # check pending jobs
+        # if no pending jobs, skip
+        pending_num = job_group.get_pending_jobs_num()
+        logger.debug("[Scheduling Batch Jobs] Job queue <%s> - pending jobs : %s",
+                      job_group.group_postfix, pending_num)
+        
+        if pending_num == 0:
+            logger.debug("[Scheduling Batch Jobs] Skip this job queue <%s>", 
+                         job_group.group_postfix)
+            continue
+            
         exec_cluster = job_group.exec_cluster
+        
         if exec_cluster.cluster_name in scheduled_clusters_name:
+            logger.debug("[Scheduling Batch Jobs] This cluster <%s> is already scheduled", 
+                         exec_cluster.cluster_name)
             continue
         
         scheduled_clusters_name.append(exec_cluster.cluster_name)
-        print("Exec cluster list: ", scheduled_clusters_name)
         
         # sync
         sync_kubernetes_cluster(cluster_config=exec_cluster.cluster_config_dict, 
                                 get_usage=True,
                                 get_pods=True)
-        
         c_state = exec_cluster.get_cluster_state_for_batchjobs()
-        
         numb_of_allocatable_nodes = c_state['num_of_allocatable_nodes']
         
+        logger.debug("[Scheduling Batch Jobs] Exec cluster : %s", scheduled_clusters_name)
+        logger.debug("[Scheduling Batch Jobs] num_of_allocatable_nodes: %s", 
+                     numb_of_allocatable_nodes)
+
         next_jobs = job_group.get_next_jobs(num=numb_of_allocatable_nodes)
         
         scheduler = JobScheduler(
@@ -200,25 +251,69 @@ def processing_batch_jobs(
             deployment_manifest=job_group.deployment_manifest,
             cluster_state=c_state
         )
-        
+
         scheduled_jobs = scheduler.schedule()
-        
+
         update_scheduling_result(scheduled_jobs=scheduled_jobs)
-        
+
         # trigger single job workflow control 
         for job in scheduled_jobs:
-            single_job_workflow_control.delay(job_uuid=job['job_uuid'])
+            job_workflow_control.delay(job_uuid=job['job_uuid'])
+
+        # check it in 5 secs
+        batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
+                                            countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD * 2)
         
-
-
-@transaction.atomic
-def update_scheduling_result(scheduled_jobs: list) -> None:
+        logger.debug("[Scheduling Batch Jobs] Finish.")
+    
+@shared_task()
+def batch_job_deployment_control(
+    batch_job_dep_uuid: str) -> None:
     """
-    Update the scheduling result to the database.
+    High level controller to control the entire workflow of batch job deployment.
+    Trigger the new scheduling process if there are pending jobs.
     """
-    for job in scheduled_jobs:
-        job_obj = KuberosJob.objects.get(uuid=job['job_uuid'])
-        job_obj.update_scheduled_result(sc_result=job)
+
+    logger.debug("[Batch Job Deployment] Processing batch jobs")
+    
+    batch_job_dep = BatchJobDeployment.objects.get(uuid=batch_job_dep_uuid)
+    
+    status = batch_job_dep.status
+    
+    # if in pending status, trigger the job units generation.
+    if status == BatchJobDeployment.StatusChoices.PENDING:
+        generate_job_queues.delay(batch_job_dep_uuid=batch_job_dep_uuid)
+    
+    # if the preprocessing is not finished, return failure.
+    if status == BatchJobDeployment.StatusChoices.EXECUTING:
+        # check job status
+        batch_jobs_statistic = batch_job_dep.get_job_statistics()
+        
+        logger.info("[Batch Job Deployment] Job statistics: %s", batch_jobs_statistic)
+        
+        if batch_jobs_statistic['num_processing'] == 0 and batch_jobs_statistic['num_pending'] == 0:
+            logger.info("[Batch Job Deployment] All jobs are finished, switch to cleaning")
+            batch_job_dep.status = BatchJobDeployment.StatusChoices.CLEANING
+            batch_job_dep.save()
+        
+        scheduling_batch_jobs.delay(batch_job_dep_uuid=batch_job_dep_uuid)
+        
+    if status == BatchJobDeployment.StatusChoices.CLEANING:
+        logger.info("[Batch Job Deployment] Cleaning deployed resources")
+        batch_job_dep.status = BatchJobDeployment.StatusChoices.COMPLETED
+        batch_job_dep.save()
+    
+    if status == BatchJobDeployment.StatusChoices.COMPLETED:
+        logger.info("[Batch Job Deployment] Cleaned, archieve the deployment.")
+        # Cleaned all deployed resources
+        batch_job_dep.status = BatchJobDeployment.StatusChoices.ARCHIEVED
+        batch_job_dep.save()
+        pass
+
+    if status == BatchJobDeployment.StatusChoices.FAILED:
+        # clean the deployed resources
+        pass
+    
 
 
 @shared_task()
@@ -228,7 +323,7 @@ def single_job_preparing(job_uuid: str) -> None:
     """
     job = KuberosJob.objects.get(uuid=job_uuid)
     
-    logger.debug("[Single Job] Preparing - %s", job.slug)
+    logger.debug("[Job Preparing] - %s", job.slug)
     
     kube_config = job.batch_job_group.exec_cluster.cluster_config_dict
     kube_exec = KuberosExecuter(kube_config=kube_config)
@@ -240,19 +335,22 @@ def single_job_preparing(job_uuid: str) -> None:
     )
     
     if response['status'] == 'success':
-        logger.debug("[Single Job Preparing] Waiting for the dds discovery server to be ready")
+        logger.debug("[Job Preparing] Waiting for the dds discovery server to be ready")
         job.job_status = KuberosJob.StatusChoices.PREPARING
         
     else:
-        logger.error("[Single Job Preparing] Failed to deploy the dds discovery server")
+        logger.error("[Job Preparing] Failed to deploy the dds discovery server")
         logger.error(response['errors'])
+        job.add_error_msg(response['errors'])
         job.job_status = KuberosJob.StatusChoices.FAILED
-    
+
     job.save()
     
     # check is again in 2 sec.
-    check_single_job_status.apply_async(args=(job_uuid,),
-                                            countdown=2)
+    # check_single_job_status.apply_async(args=(job_uuid,), countdown=2)
+    job_workflow_control.apply_async(args=(job_uuid,), 
+                                     countdown=DEFAULT_JOB_CHECK_PERIOD)
+
 
 @shared_task()
 def single_job_deploying_rosmodules(job_uuid: str) -> None:
@@ -262,7 +360,7 @@ def single_job_deploying_rosmodules(job_uuid: str) -> None:
     
     job = KuberosJob.objects.get(uuid=job_uuid)
     
-    logger.debug("[Single Job] Deploying - %s", job.slug)
+    logger.debug("[Job Deploying] - %s", job.slug)
     
     kube_config = job.batch_job_group.exec_cluster.cluster_config_dict
     kube_exec = KuberosExecuter(kube_config=kube_config)
@@ -275,16 +373,14 @@ def single_job_deploying_rosmodules(job_uuid: str) -> None:
     
     # update status
     if response['status'] == 'success':
-        logger.debug("ROS modules deployed")
+        logger.debug("[Job Deploying] ROS modules deployed")
         job.job_status = KuberosJob.StatusChoices.DEPLOYING
-        
-        print("DDDDDD" * 10)
-        print("CHECK , JOB STATUS: ", job.job_status)
-    
         job.save()
+
     else:
-        logger.error("Failed to deploy ROS modules")
+        logger.error("[Job Deploying] Failed to deploy ROS modules")
         logger.error(response['errors'])
+        job.add_error_msg(response['errors'])
         job.job_status = KuberosJob.StatusChoices.FAILED
 
     job.save()
@@ -301,8 +397,8 @@ def check_single_job_status(job_uuid: str) -> None:
     """
     job = KuberosJob.objects.get(uuid=job_uuid)
     
-    logger.debug("[Single Job] Check - %s", job.slug)
-    logger.debug("[Job Status ] - %s - %s", job.slug, job.job_status)
+    # logger.debug("[Single Job] Check - %s", job.slug)
+    # logger.debug("[Job Status ] - %s - %s", job.slug, job.job_status)
     
     kube_config = job.batch_job_group.exec_cluster.cluster_config_dict
     kube_exec = KuberosExecuter(kube_config=kube_config)
@@ -315,23 +411,26 @@ def check_single_job_status(job_uuid: str) -> None:
     svc_status = svc_res['data']
     
     
-    next_action = job.update_pod_status(pod_status=pod_status,
-                          svc_status=svc_status)
-    if next_action == 'next':
-        single_job_workflow_control.apply_async(args=(job_uuid,),)
-    else:
-        check_single_job_status.apply_async(args=(job_uuid,),
-                                            countdown=4)
+    next_action = job.update_pod_status(pod_status=pod_status, 
+                                        svc_status=svc_status)
+    
+    logger.debug("[Single Job] Next action - %s", next_action)
+   #if next_action == 'next':
+    job_workflow_control.apply_async(args=(job_uuid,), 
+                                                countdown=DEFAULT_JOB_CHECK_PERIOD)
+    # else:
+    #    check_single_job_status.apply_async(args=(job_uuid,),
+    #                                        countdown=5)
 
 
 @shared_task()
-def clean_single_job(job_uuid: str) -> None:
+def single_job_terminating(job_uuid: str) -> None:
     """
-    Delete the single job.
+    Terminate the single job.
     """
     job = KuberosJob.objects.get(uuid=job_uuid)
     
-    logger.debug("[Single Job] Cleaning - %s", job.slug)
+    logger.debug("[Job Termintating] - Terminating <%s>", job.slug)
     
     kube_config = job.batch_job_group.exec_cluster.cluster_config_dict
     kube_exec = KuberosExecuter(kube_config=kube_config)
@@ -345,29 +444,28 @@ def clean_single_job(job_uuid: str) -> None:
     )
 
     if response['status'] == 'success':
-        logger.debug("ROS modules deleted")
-        job.job_status = KuberosJob.StatusChoices.CLEANING
+        logger.debug("[Job Termintating] ROS modules deleted")
+        job.job_status = KuberosJob.StatusChoices.TERMINATING
 
     else:
-        logger.error("Failed to delete ROS modules")
+        logger.error("[Job Termintating] Failed to delete ROS modules")
         logger.error(response['errors'])
+        job.add_error_msg(response['errors'])
         job.job_status = KuberosJob.StatusChoices.FAILED
-        
-    # switch status to CLEANING
-    job.job_status = KuberosJob.StatusChoices.CLEANING
+
     job.save()
 
 
 
 @shared_task()
-def single_job_workflow_control(job_uuid: str) -> None:
+def job_workflow_control(job_uuid: str) -> None:
     """
     Control the workflow of a single job.
     """
     
     job = KuberosJob.objects.get(uuid=job_uuid)
     
-    logger.debug("[Single Job] Workflow control %s", job.slug)
+    logger.debug("[Job Workflow Control] Job <%s> status: %s", job.slug, job.job_status)
     
     if job.job_status == KuberosJob.StatusChoices.SCHEDULED:
         single_job_preparing.delay(job_uuid=job_uuid)
@@ -375,44 +473,32 @@ def single_job_workflow_control(job_uuid: str) -> None:
     elif job.job_status == KuberosJob.StatusChoices.PREPARED:
         single_job_deploying_rosmodules.delay(job_uuid=job_uuid)
     
-    elif job.job_status == KuberosJob.StatusChoices.SUCCEED:
-        clean_single_job.delay(job_uuid=job_uuid)
     
     elif job.job_status in [KuberosJob.StatusChoices.PREPARING, 
                         KuberosJob.StatusChoices.DEPLOYING,
-                        KuberosJob.StatusChoices.CLEANING]:
-        check_single_job_status.delay(job_uuid=job_uuid)
+                        KuberosJob.StatusChoices.TERMINATING]:
+        check_single_job_status.apply_async(args=(job_uuid,),
+                                     countdown=5)
         
     elif job.job_status == KuberosJob.StatusChoices.RUNNING:
         check_single_job_status.apply_async(args=(job_uuid,),
-                                            countdown=4)
+                                            countdown=5)
     
-    elif job.job_status in [KuberosJob.StatusChoices.FAILED, 
-                        KuberosJob.StatusChoices.CLEANED]:
-        logger.info("[Single Job] Job %s is in %s status, skip", job_uuid, job.job_status)
+    elif job.job_status == KuberosJob.StatusChoices.FINISHED:
+        single_job_terminating.apply_async(args=(job_uuid,),
+                                     countdown=5)
+    
+    elif job.job_status in [KuberosJob.StatusChoices.COMPLETED, 
+                        KuberosJob.StatusChoices.FAILED]:
+        logger.info("[Job Workflow Control] Job <%s> is terminated with status: %s", 
+                    job_uuid, job.job_status)
 
-    elif job.job_status == KuberosJob.StatusChoices.SUCCEED:
-        logger.info("[Single Job] Job %s is in %s status, cleaning", job_uuid, job.job_status)
-        clean_single_job(job_uuid=job_uuid)
-        
+    else:
+        job.add_error_msg("Job is in unknown status")
+        logger.warning("[Job Workflow Control] Job <%s> is in unknown status: %s")
     
-@shared_task()
-def batch_job_deployment_controller(
-    batch_job_dep_uuid: str) -> None:
-    """
-    High level controller to control the entire workflow of batch job deployment.
-    """
-    logger.debug("[Batch Job Deployment] Processing batch jobs")
-    
-    batch_job_dep = BatchJobDeployment.objects.get(uuid=batch_job_dep_uuid)
-    
-    status = batch_job_dep.status
-    
-    # if in pending status, trigger the job units generation.
-    if status == BatchJobDeployment.StatusChoices.PENDING:
-        generate_job_queues.delay(batch_job_dep_uuid=batch_job_dep_uuid)
-    
-    # if the preprocessing is not finished, return failure.
-    if status == BatchJobDeployment.StatusChoices.EXECUTING:
-        processing_batch_jobs.delay(batch_job_dep_uuid=batch_job_dep_uuid)
+
+
+
+
     
