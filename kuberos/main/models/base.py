@@ -45,6 +45,12 @@ class BaseModel(models.Model):
         default=timezone.now
         )
 
+    def __str__(self) -> str:
+        return str(self.name)
+    
+    def get_uuid(self) -> str:
+        return str(self.uuid)
+    
 
 def get_sentinel_user():
     return get_user_model().objects.get_or_create(username='deleted')[0]
