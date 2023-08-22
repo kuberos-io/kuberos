@@ -32,6 +32,13 @@ from .deployments import (
     DeploymentJob
 )
 
+# BachJobs
+from .batchjobs import (
+    BatchJobDeployment,
+    BatchJobGroup,
+    KuberosJob
+)
+
 # Ros packages
 from .rospackages import (
     RosNodeMeta,
