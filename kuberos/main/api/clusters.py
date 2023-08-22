@@ -117,14 +117,16 @@ class ClusterViewSet(viewsets.ViewSet):
         """
         # sync the cluster to get the latest status
         force_sync = request.data['sync'] ## type: str, value: 'True' or 'False'
-
+        get_usage = True if request.data['get_usage'] == 'True' else False
+        
         response = KuberosResponse()
 
         try:
             cluster = Cluster.objects.get(cluster_name=cluster_name)
             if force_sync == 'True':
                 cluster_config = cluster.cluster_config_dict
-                sync_res = sync_kubernetes_cluster(cluster_config=cluster_config)
+                sync_res = sync_kubernetes_cluster(cluster_config=cluster_config,
+                                                   get_usage=get_usage)
 
                 # return the error message if the sync failed
                 if sync_res['status'] == 'failed':
@@ -205,6 +207,7 @@ class ClusterViewSet(viewsets.ViewSet):
 
 
 class ClusterNodeViewSet(viewsets.ViewSet):
+    
     permission_classes = [permissions.IsAuthenticated]
     
     # GET list 
@@ -248,20 +251,40 @@ class ListFreeClusterNodeView(generics.ListAPIView):
         cluster_nodes = ClusterNode.objects.filter(in_fleet=False)
         logger.debug(cluster_nodes)
         return cluster_nodes
-        
 
-# SCM 
+ 
 class ContainerRegistryAccessTokenViewSet(viewsets.ViewSet):
+
     permission_classes = [permissions.IsAuthenticated]
-    
-    # GET list 
+
     def list(self, request):
+        """
+        List all container registry access token
+        
+        GET api/<version>/cluster/container_registry_access_tokens/
+        """
+        
+        response = KuberosResponse()
+        
         access_tokens = ContainerRegistryAccessToken.objects.filter(created_by=request.user)
         serializer = ContainerRegistryAccessTokenSerializer(access_tokens, many=True)
-        return Response(serializer.data)
+        
+        response.set_data(serializer.data)
+        response.set_success()
+        
+        return Response(response.to_dict(),
+                        status=status.HTTP_200_OK)
     
     # POST
     def create(self, request):
+        """
+        Create a new container registry access token
+        
+        POST api/<version>/cluster/container_registry_access_tokens/
+        """
+        
+        response = KuberosResponse()
+        
         serializer = ContainerRegistryAccessTokenSerializer(
             data=request.data,
             context={
@@ -269,14 +292,27 @@ class ContainerRegistryAccessTokenViewSet(viewsets.ViewSet):
             },
             partial=False
         )
-        serializer.is_valid(raise_exception=True)
+
+        # check the validation
+        if not serializer.is_valid():
+            # return failed response
+            logger.error("Invalid data for registry token creation")
+            logger.error(serializer.errors)
+            response.set_failed(
+                reason='ValidationFailed',
+                err_msg=f'Registry token validation error - {serializer.errors}'
+            )
+            return Response(response.to_dict(),
+                            status=status.HTTP_202_ACCEPTED)
+
+        # valid data
         serializer.save()
-        response = {
-            'status': 'success',
-            'uuid': serializer.data['uuid'],
-            'name': serializer.data['name'],
-        }
-        return Response(response, status=status.HTTP_201_CREATED)
+        response.set_data(serializer.data)
+        response.set_success(
+            msg='New cluster is registered in KubeROS'
+        )
+        return Response(response.to_dict(), 
+                        status=status.HTTP_201_CREATED)
     
     # GET by uuid
     def retrieve(self, request, uuid):
