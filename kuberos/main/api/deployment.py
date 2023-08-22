@@ -53,7 +53,8 @@ class DeploymentViewSet(viewsets.ViewSet):
         response = KuberosResponse()
         
         try:
-            deployment = Deployment.objects.get(name=deployment_name)
+            deployment = Deployment.objects.get(name=deployment_name,
+                                                active=True)
             serializer = DeploymentSerializer(deployment)
             
             response.set_data(serializer.data)

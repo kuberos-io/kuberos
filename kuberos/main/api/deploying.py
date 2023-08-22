@@ -23,6 +23,7 @@ from main.models import (
 from main.tasks.cluster_operating import (
     sync_kubernetes_cluster,
 )
+
 from main.tasks.deployment_controller import (
     processing_deployment_job,
     prepare_deployment_env,
@@ -192,6 +193,7 @@ class DeployRosModuleViewSet(viewsets.ViewSet):
                             status=status.HTTP_202_ACCEPTED)
         
         # create deployment instance
+        # TODO: Check why fleet is not store by creating
         deployment = Deployment.objects.create(
             name=meta_data['name'],
             created_by=request.user,
@@ -340,6 +342,7 @@ class DeployRosModuleViewSet(viewsets.ViewSet):
         # if deployment.configmaps_created:
         # problem with cocurrent database access with celery
         # TODO: try to fix this issue later
+        # TODO: Fleet is NontType!!!
         config_maps = deployment.get_config_maps()
         delete_configmap_res = delete_deployed_configmaps(
                 kube_config=deployment.fleet.k8s_main_cluster.cluster_config_dict, 
