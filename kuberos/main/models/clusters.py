@@ -279,30 +279,33 @@ class Cluster(BaseTagModel):
         self.save()
 
     def update_resource_usage(self, metrics: dict) -> None:
+        """
+        DEPRECATED
+        """
         self.resource_usage = metrics
         self.save()
-    
-    def get_node_allocable_state(self, use_robot=True) -> dict:
-        allocable_state = []
+
+    def get_cluster_state_for_batchjobs(self, use_robot=True) -> dict:
+        """
+        Get the cluster state for batchjobs
+        """
+        state = {
+            'cluster_name': self.cluster_name,
+            'nodes': []
+        }
         for node in self.cluster_node_set.all():
             if node.kuberos_role == ClusterNode.ROLE_CHOICES.CONTROL_PLANE:
                 continue
             if node.kuberos_role == ClusterNode.ROLE_CHOICES.ONBOARD:
                 if not use_robot:
                     continue
-            allocable_state.append(node.get_allocable())
-        return allocable_state
-    
-    def get_cluster_resource_usage(self) -> dict:
-        """
-        Get the cluster resource usage
-        """
-        result = []
-        for node in self.cluster_node_set.all():
-            capacity = node.get_capacity()
-            cpu_usage = self.resource_usage['cpu']['usage']
-        return self.resource_usage
-    
+            state['nodes'].append(node.get_allocatable())
+            
+        state['num_of_allocatable_nodes'] = len(state['nodes'])
+        
+        return state
+
+
     def get_cluster_node_uuid_list(self) -> list:
         """
         Get cluster node uuid list
@@ -653,6 +656,7 @@ class ClusterNode(BaseModel):
     def get_allocatable(self) -> dict:
         """
         Get allocatable resources of the cluster node
+        TODO: Check the storage usage
         """
         result = {
             'hostname': self.hostname,
@@ -665,7 +669,8 @@ class ClusterNode(BaseModel):
             result['cpu'] = cap['cpu'] - use['cpu']
             result['memory'] = cap['memory'] - use['memory']
             result['storage'] = cap['storage'] - use['storage']
-            
+            # result['existed_pods'] = self.get_existed_pod_list()
+            result['num_pods'] = len(self.get_existed_pod_list())
             if result['cpu'] < 0 or result['memory'] < 0 or result['storage'] < 0:
                 result['is_allocatable'] = False
 
@@ -714,6 +719,10 @@ class ClusterNode(BaseModel):
                 'storage': -1
             }
 
+    def get_existed_pod_list(self) -> list:
+        return self.node_state['pods']
+    
+    
     def get_current_fleet(self):
         fleet = self.cluster_node_set.all()
         if len(fleet) == 0:
