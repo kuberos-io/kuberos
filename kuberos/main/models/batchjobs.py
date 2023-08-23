@@ -46,6 +46,10 @@ from main.models.base import UserRelatedBaseModel, get_sentinel_user
 from main.models import Cluster
 
 
+logger = logging.getLogger('kuberos.main.scheduler')
+logger.propagate = False
+
+
 class BatchJobDeployment(UserRelatedBaseModel):
     
     class StatusChoices(models.TextChoices):
@@ -105,7 +109,7 @@ class BatchJobDeployment(UserRelatedBaseModel):
     )
     
     job_timeout = models.IntegerField(
-        default = 300,
+        default = 180,
         verbose_name='Job timeout, unit: sec'
     )
     
@@ -174,7 +178,16 @@ class BatchJobDeployment(UserRelatedBaseModel):
             'queues': queues
         }
         
-        
+    def get_all_configmaps(self):
+        """
+        Get all configmaps
+        For cleaning the global resources
+        """
+        configmaps = []
+        for group in self.batch_job_group_set.all():
+            configmaps.extend(group.configmaps)
+        return configmaps
+    
 class BatchJobGroup(models.Model):
     """
     Each batch job group is executed on a single cluster.
@@ -207,8 +220,7 @@ class BatchJobGroup(models.Model):
         blank=True,
         null=True
     )
-    
-    
+
     deployment_manifest = models.JSONField(
         null=True,
         blank=True
@@ -216,7 +228,8 @@ class BatchJobGroup(models.Model):
     
     configmaps = models.JSONField(
         null=True,
-        blank=True
+        blank=True,
+        default=list
     )
     
     repeat_num = models.IntegerField(
@@ -333,17 +346,19 @@ class KuberosJob(models.Model):
         default=StatusChoices.PENDING
     )
     
+    # TO BE DELETED
     deployment_manifest = models.JSONField(
         null=True,
         blank=True
     )
+    # TO BE DELETED
     
     running_timeout = models.IntegerField(
-        default=300,
+        default=360,
     )
     
     startup_timeout = models.IntegerField(
-        default=300,
+        default=360,
     )
     
     # updated by job controller

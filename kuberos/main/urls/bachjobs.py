@@ -15,6 +15,7 @@ urls = [
 
     path('batch_jobs/<str:batch_job_name>/',
          BatchJobDeploymentViewSet.as_view({
+             'get': 'retrieve',
              'delete': 'delete'
          }))    
 

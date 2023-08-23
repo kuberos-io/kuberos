@@ -15,7 +15,7 @@ from celery import shared_task
 from pykuberos.kuberos_executer import KuberosExecuter
 from pykuberos.scheduler.job_scheduler import JobScheduler
 
-from pykuberos.scheduler.rosparameter import RosParameter, RosParamMap, RosParamMapList
+from pykuberos.scheduler.rosparameter import RosParamMapList
 
 from main.models import (
     BatchJobDeployment,
@@ -27,13 +27,13 @@ from main.tasks.cluster_operating import (
     sync_kubernetes_cluster
 )
 
+
 logger = logging.getLogger('kuberos.main.tasks')
 logger.propagate = False
 
 
-DEFAULT_JOB_CHECK_PERIOD = 5 # seconds
-
-DEFAULT_BATCH_JOB_SCHEDULING_PERIOD = 5 # seconds
+DEFAULT_JOB_CHECK_PERIOD = 1 # seconds
+DEFAULT_BATCH_JOB_SCHEDULING_PERIOD = 1 # seconds
 
 
 def replace_rosparam(dep_manifest: str,
@@ -117,6 +117,7 @@ def create_kuberos_jobs(
         except IntegrityError:
             continue
 
+
 # Database operations
 # @transaction.atomic
 def update_scheduling_result(scheduled_jobs: list) -> None:
@@ -130,16 +131,13 @@ def update_scheduling_result(scheduled_jobs: list) -> None:
         job_obj.update_scheduled_result(sc_result=job)
 
 
-
-
-
 @shared_task()
 def generate_job_queues(
     batch_job_dep_uuid: str) -> None:
     """
     Generate the batch job deployment unit.
     
-    Combination of varyingParameter and repeatModule. 
+    Combination of varyingParameter.
 
     """
     logger.debug("[Batch Job] Generate job queues")
@@ -178,17 +176,15 @@ def generate_job_queues(
             batch_job_dep.status = BatchJobDeployment.StatusChoices.EXECUTING
             batch_job_dep.save()
             
-            # trigger check the whole process.
-            batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
-                                                       countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD * 2)
-            
         else: 
             logger.error("[Generate Job Queues] Failed to create configmaps")
             logger.error(response['errors'])
             batch_job_dep.status = BatchJobDeployment.StatusChoices.FAILED
             batch_job_dep.save()
-        
-
+    
+    # back to the workflow control
+    batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
+                                                countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD)
 
 
 # Change name to scheduling_batch_jobs
@@ -243,6 +239,8 @@ def scheduling_batch_jobs(
         logger.debug("[Scheduling Batch Jobs] Exec cluster : %s", scheduled_clusters_name)
         logger.debug("[Scheduling Batch Jobs] num_of_allocatable_nodes: %s", 
                      numb_of_allocatable_nodes)
+        logger.debug("[Scheduling Batch Jobs] Cluster state: %s", 
+                     c_state)
 
         next_jobs = job_group.get_next_jobs(num=numb_of_allocatable_nodes)
         
@@ -260,25 +258,50 @@ def scheduling_batch_jobs(
         for job in scheduled_jobs:
             job_workflow_control.delay(job_uuid=job['job_uuid'])
 
-        # check it in 5 secs
-        batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
-                                            countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD * 2)
-        
-        logger.debug("[Scheduling Batch Jobs] Finish.")
+    # back to the workflow control
+    batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
+                                        countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD)
     
+    logger.debug("[Scheduling Batch Jobs] Finish.")
+
 @shared_task()
-def batch_job_deployment_control(
-    batch_job_dep_uuid: str) -> None:
+def batch_job_cleaning(batch_job_dep_uuid: str) -> None:
+    
+    batch_job_dep = BatchJobDeployment.objects.get(uuid=batch_job_dep_uuid)
+
+    logger.debug("[Batch Job Deployment] Cleaning %s", batch_job_dep.name)
+    
+    for job_group in batch_job_dep.batch_job_group_set.all():
+        kube_exec = KuberosExecuter(kube_config=job_group.exec_cluster.cluster_config_dict)
+        response = kube_exec.delete_deployed_configmaps(configmap_list=job_group.configmaps)
+        
+        if not response['status'] == 'success':
+            logger.error("[Batch Job Deployment] Failed to delete configmaps in queue <%s>", job_group.group_postfix)
+            logger.error(response['errors'])
+        # TODO: add error handling
+        #    batch_job_dep.status = BatchJobDeployment.StatusChoices.FAILED
+        #    batch_job_dep.save()
+        #    return False
+    
+    batch_job_dep.status = BatchJobDeployment.StatusChoices.COMPLETED
+    batch_job_dep.save()
+
+    # back to workflow control
+    batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
+                                             countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD)
+
+
+@shared_task()
+def batch_job_deployment_control(batch_job_dep_uuid: str) -> None:
     """
     High level controller to control the entire workflow of batch job deployment.
     Trigger the new scheduling process if there are pending jobs.
     """
 
-    logger.debug("[Batch Job Deployment] Processing batch jobs")
-    
     batch_job_dep = BatchJobDeployment.objects.get(uuid=batch_job_dep_uuid)
-    
     status = batch_job_dep.status
+    
+    logger.debug("[Batch Job Deployment] Workflow control - Status: %s", status)
     
     # if in pending status, trigger the job units generation.
     if status == BatchJobDeployment.StatusChoices.PENDING:
@@ -299,6 +322,8 @@ def batch_job_deployment_control(
         scheduling_batch_jobs.delay(batch_job_dep_uuid=batch_job_dep_uuid)
         
     if status == BatchJobDeployment.StatusChoices.CLEANING:
+        
+        batch_job_cleaning.delay(batch_job_dep_uuid=batch_job_dep_uuid)
         logger.info("[Batch Job Deployment] Cleaning deployed resources")
         batch_job_dep.status = BatchJobDeployment.StatusChoices.COMPLETED
         batch_job_dep.save()
@@ -308,12 +333,10 @@ def batch_job_deployment_control(
         # Cleaned all deployed resources
         batch_job_dep.status = BatchJobDeployment.StatusChoices.ARCHIEVED
         batch_job_dep.save()
-        pass
 
     if status == BatchJobDeployment.StatusChoices.FAILED:
         # clean the deployed resources
-        pass
-    
+        logger.info("[Batch Job Deployment] Faild, TODO: error handling")
 
 
 @shared_task()
@@ -411,16 +434,12 @@ def check_single_job_status(job_uuid: str) -> None:
     svc_status = svc_res['data']
     
     
-    next_action = job.update_pod_status(pod_status=pod_status, 
-                                        svc_status=svc_status)
+    job.update_pod_status(pod_status=pod_status,
+                          svc_status=svc_status)
     
-    logger.debug("[Single Job] Next action - %s", next_action)
-   #if next_action == 'next':
-    job_workflow_control.apply_async(args=(job_uuid,), 
-                                                countdown=DEFAULT_JOB_CHECK_PERIOD)
-    # else:
-    #    check_single_job_status.apply_async(args=(job_uuid,),
-    #                                        countdown=5)
+    # back to the workflow control
+    job_workflow_control.apply_async(args=(job_uuid,),
+                                     countdown=DEFAULT_JOB_CHECK_PERIOD)
 
 
 @shared_task()
@@ -446,14 +465,18 @@ def single_job_terminating(job_uuid: str) -> None:
     if response['status'] == 'success':
         logger.debug("[Job Termintating] ROS modules deleted")
         job.job_status = KuberosJob.StatusChoices.TERMINATING
+        job.save()
 
     else:
         logger.error("[Job Termintating] Failed to delete ROS modules")
         logger.error(response['errors'])
         job.add_error_msg(response['errors'])
         job.job_status = KuberosJob.StatusChoices.FAILED
-
-    job.save()
+        job.save()
+    
+    # back to the workflow control
+    job_workflow_control.apply_async(args=(job_uuid,),
+                                     countdown=DEFAULT_JOB_CHECK_PERIOD)
 
 
 
@@ -496,9 +519,6 @@ def job_workflow_control(job_uuid: str) -> None:
     else:
         job.add_error_msg("Job is in unknown status")
         logger.warning("[Job Workflow Control] Job <%s> is in unknown status: %s")
-    
 
 
 
-
-    
