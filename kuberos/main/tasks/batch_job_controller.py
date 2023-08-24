@@ -33,7 +33,11 @@ logger.propagate = False
 
 
 DEFAULT_JOB_CHECK_PERIOD = 1 # seconds
+DEFAULT_JOB_CHECK_PERIOD_AT_RUNNING = 2 # seconds - reduce the check frequency
+
 DEFAULT_BATCH_JOB_SCHEDULING_PERIOD = 1 # seconds
+
+
 
 
 def replace_rosparam(dep_manifest: str,
@@ -110,8 +114,10 @@ def create_kuberos_jobs(
         try:
             KuberosJob.objects.create(
                 batch_job_group = batch_job_group,
-                deployment_manifest = batch_job_group.deployment_manifest,
-                slug = f"{get_random_string(length=10, allowed_chars='abcdefghijklmnopqrstuvwxyz')}"
+                # deployment_manifest = batch_job_group.deployment_manifest,
+                slug = f"{get_random_string(length=10, allowed_chars='abcdefghijklmnopqrstuvwxyz')}",
+                startup_timeout = batch_job_group.deployment.startup_timeout,
+                running_timeout = batch_job_group.deployment.running_timeout,
             )
             repeat_num -= 1
         except IntegrityError:
@@ -173,8 +179,7 @@ def generate_job_queues(
             create_kuberos_jobs(batch_job_group=batch_job_group)
 
             # switch the status to EXECUTING
-            batch_job_dep.status = BatchJobDeployment.StatusChoices.EXECUTING
-            batch_job_dep.save()
+            batch_job_dep.switch_status_to_executing()
             
         else: 
             logger.error("[Generate Job Queues] Failed to create configmaps")
@@ -282,13 +287,10 @@ def batch_job_cleaning(batch_job_dep_uuid: str) -> None:
         #    batch_job_dep.status = BatchJobDeployment.StatusChoices.FAILED
         #    batch_job_dep.save()
         #    return False
-    
-    batch_job_dep.status = BatchJobDeployment.StatusChoices.COMPLETED
-    batch_job_dep.save()
 
     # back to workflow control
     batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
-                                             countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD)
+                                             countdown=3)
 
 
 @shared_task()
@@ -325,18 +327,14 @@ def batch_job_deployment_control(batch_job_dep_uuid: str) -> None:
         
         batch_job_cleaning.delay(batch_job_dep_uuid=batch_job_dep_uuid)
         logger.info("[Batch Job Deployment] Cleaning deployed resources")
-        batch_job_dep.status = BatchJobDeployment.StatusChoices.COMPLETED
-        batch_job_dep.save()
-    
+        # TODO: Check the cleaning status
+        batch_job_dep.switch_status_to_completed()
+
     if status == BatchJobDeployment.StatusChoices.COMPLETED:
         logger.info("[Batch Job Deployment] Cleaned, archieve the deployment.")
-        # Cleaned all deployed resources
-        batch_job_dep.status = BatchJobDeployment.StatusChoices.ARCHIEVED
-        batch_job_dep.save()
 
-    if status == BatchJobDeployment.StatusChoices.FAILED:
-        # clean the deployed resources
-        logger.info("[Batch Job Deployment] Faild, TODO: error handling")
+
+
 
 
 @shared_task()
@@ -360,17 +358,16 @@ def single_job_preparing(job_uuid: str) -> None:
     if response['status'] == 'success':
         logger.debug("[Job Preparing] Waiting for the dds discovery server to be ready")
         job.job_status = KuberosJob.StatusChoices.PREPARING
-        
+        job.save()
+
     else:
         logger.error("[Job Preparing] Failed to deploy the dds discovery server")
         logger.error(response['errors'])
         job.add_error_msg(response['errors'])
         job.job_status = KuberosJob.StatusChoices.FAILED
-
-    job.save()
+        job.save()
     
-    # check is again in 2 sec.
-    # check_single_job_status.apply_async(args=(job_uuid,), countdown=2)
+    # back to the workflow control
     job_workflow_control.apply_async(args=(job_uuid,), 
                                      countdown=DEFAULT_JOB_CHECK_PERIOD)
 
@@ -393,12 +390,11 @@ def single_job_deploying_rosmodules(job_uuid: str) -> None:
     response = kube_exec.deploy_rosmodules(
         pod_list = pod_list,
     )
-    
+
     # update status
     if response['status'] == 'success':
         logger.debug("[Job Deploying] ROS modules deployed")
-        job.job_status = KuberosJob.StatusChoices.DEPLOYING
-        job.save()
+        job.switch_status_to_deploying()
 
     else:
         logger.error("[Job Deploying] Failed to deploy ROS modules")
@@ -408,9 +404,10 @@ def single_job_deploying_rosmodules(job_uuid: str) -> None:
 
     job.save()
 
-    # check
-    check_single_job_status.apply_async(args=(job_uuid,),
-                                            countdown=4)
+    # back to the workflow control
+    job_workflow_control.apply_async(args=(job_uuid,),
+                                     countdown=2)
+
     
 
 @shared_task()
@@ -501,15 +498,15 @@ def job_workflow_control(job_uuid: str) -> None:
                         KuberosJob.StatusChoices.DEPLOYING,
                         KuberosJob.StatusChoices.TERMINATING]:
         check_single_job_status.apply_async(args=(job_uuid,),
-                                     countdown=5)
+                                     countdown=DEFAULT_JOB_CHECK_PERIOD)
         
     elif job.job_status == KuberosJob.StatusChoices.RUNNING:
         check_single_job_status.apply_async(args=(job_uuid,),
-                                            countdown=5)
+                                            countdown=DEFAULT_JOB_CHECK_PERIOD_AT_RUNNING)
     
     elif job.job_status == KuberosJob.StatusChoices.FINISHED:
         single_job_terminating.apply_async(args=(job_uuid,),
-                                     countdown=5)
+                                     countdown=0)
     
     elif job.job_status in [KuberosJob.StatusChoices.COMPLETED, 
                         KuberosJob.StatusChoices.FAILED]:

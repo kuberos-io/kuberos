@@ -328,6 +328,7 @@ class DiscoveryServer(object):
                  image_url: str = None,
                  image_pull_policy: str = 'Always',
                  add_env_for_introspection: bool = True,  # TODO Review!
+                 skip_running: bool = False, # TODO: Issue with DDS in NAV2
                  ) -> None:
         self._name = name
         self.port = port
@@ -352,6 +353,14 @@ class DiscoveryServer(object):
         if add_env_for_introspection:
             self.set_env_for_introsprection()
 
+        self._command = 'source /opt/ros/humble/setup.bash; fastdds discovery --server-id 0 --port 11811 -b'
+
+        if skip_running:
+            # TODO: Short cut
+            # Issue: If we use cycloneDDS in the NAV2 example, 
+            #        the CPU usage of discovery server node is about 1000 millicores.
+            self._command = 'sleep 36000'
+        
 
     def set_env_for_introsprection(self):
         """
@@ -414,13 +423,19 @@ class DiscoveryServer(object):
                     'imagePullPolicy': self.image_pull_policy,
                     'command': ['/bin/bash'],
                     'args': ['-c',
-                             'source /opt/ros/humble/setup.bash; fastdds discovery --server-id 0 --port 11811 -b'
+                             self._command
+                             # 'source /opt/ros/humble/setup.bash; fastdds discovery --server-id 0 --port 11811 -b'
                              ],
                     'ports': [{
                         'containerPort': self.target_port,
                         'protocol': self.port_protocol
                     }],
                     'env': self.env,
+                    # 'resources': {
+                    #     'requests': {
+                    #         'cpu': '3000m'
+                    #     },
+                    # },
                 }],
                 'imagePullSecrets': [
                     {

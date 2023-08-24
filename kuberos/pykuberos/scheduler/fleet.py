@@ -44,13 +44,16 @@ class NodeState(object):
         for example:
             robot_ip -> ROBOT_IP
         """
-        peripharal_devs = self._node_state['cluster_node_state'].get('peripheral_devices', [])
+        peripharal_devs = self._node_state['cluster_node_state'].get('peripheral_devices', {})
+        print(peripharal_devs)
         devs_new_list = []
         for dev in peripharal_devs:
             dev_new = {
                 'device_name': dev['deviceName'],
                 'parameter': {}
             }
+            # T
+            # for item in dev['parameter']:
             for key, value in dev['parameter'].items():
                 # dev_new['parameter'].update({key.upper().replace('-', '_'): value})
                 dev_new['parameter'].update({key.upper(): value})

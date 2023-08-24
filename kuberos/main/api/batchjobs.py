@@ -25,6 +25,9 @@ from main.tasks.batch_job_controller import (
 logger = logging.getLogger('kuberos.main.api')
 
 
+DEFAULT_STARTUP_TIMEOUT = 66
+DEFAULT_RUNNING_TIMEOUT = 188
+
 
 class BatchJobDeploymentViewSet(viewsets.ViewSet):
 
@@ -83,20 +86,22 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
         job_spec = manifest_dict.get('jobSpec', None)
         
         # Get cluster list
-        # TODO: check if the cluster is valid
+        # TODO: check whether the cluster is valid
         exec_clusters = []
         for cluster in meta_data['execClusters']:
             cluster_obj = Cluster.objects.get(cluster_name=cluster)
             exec_clusters.append(cluster_obj)
-                    
-            
+
         # create batch job deployment
         batch_job_dep = BatchJobDeployment.objects.create(
             name=meta_data['name'],
             created_by=request.user,
             deployment_manifest=manifest_dict,
-            job_spec=job_spec
+            job_spec=job_spec,
+            startup_timeout = job_spec.get('startupTimeout', DEFAULT_STARTUP_TIMEOUT),
+            running_timeout = job_spec.get('runningTimeout', DEFAULT_RUNNING_TIMEOUT),
         )
+        
         # Add clusters 
         for cluster in exec_clusters:
             batch_job_dep.exec_clusters.add(cluster)
@@ -109,8 +114,27 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
         )
         
         response.set_accepted(
-            msg='Request accepted, generating jobs'
+            msg='Request accepted, scheduling jobs'
         )
+        
+        return Response(response.to_dict(),
+                        status=status.HTTP_200_OK)
+        
+    def list(self, request):
+        """
+        List all batch jobs
+        GET /api/<version>/batchjobs/batchjobs/
+        """
+        
+        response = KuberosResponse()
+        
+        batch_job_deps = BatchJobDeployment.objects.filter(
+            created_by=request.user,
+            is_active=True)
+        serializer = BatchJobDeploymentSerializer(batch_job_deps, many=True)
+        
+        response.set_data(serializer.data)
+        response.set_success()
         
         return Response(response.to_dict(),
                         status=status.HTTP_200_OK)
@@ -172,5 +196,3 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
         
         return Response(response.to_dict(),
                         status=status.HTTP_200_OK)
-
-

@@ -86,7 +86,7 @@ class DeploymentManifest(object):
         # find the default container registry
         for item in container_registry:
             if item['name'] == 'default':
-                result['imagePullSecret'] = item['imagePullSecret']
+                result['imagePullSecret'] = item['imagePullSecretName']
                 result['imagePullPolicy'] = item['imagePullPolicy']
 
         return result
@@ -140,20 +140,20 @@ class RosModuleManifest(object):
         """
         Get the container registry by name
         """
-        req_container_registry = self._module_mani.get('containerRegistry', None)
+        req_container_registry = self._module_mani.get('containerRegistryName', None)
         
         if not req_container_registry:
             # use the default container registry
             for item in self._container_registry_list:
                 if item['name'] == 'default':
-                    self._container_registry['imagePullSecret'] = item['imagePullSecret']
+                    self._container_registry['imagePullSecret'] = item['imagePullSecretName']
                     self._container_registry['imagePullPolicy'] = item['imagePullPolicy']
             return
         
         # find the required container registry
         for item in self._container_registry_list:
             if item['name'] == req_container_registry:
-                self._container_registry['imagePullSecret'] = item['imagePullSecret']
+                self._container_registry['imagePullSecret'] = item['imagePullSecretName']
                 self._container_registry['imagePullPolicy'] = item['imagePullPolicy']
             return
         
@@ -198,7 +198,12 @@ class RosModuleManifest(object):
         """
         
         param_list = []
-        launch_param_dict = self._module_mani.get('launchParameters', {}) 
+        launch_param_dict = self._module_mani.get('launchParameters', None) 
+        
+        # if no launch parameter is required
+        # return empty list
+        if not launch_param_dict:
+            return param_list
         
         for param, val in launch_param_dict.items():
 
