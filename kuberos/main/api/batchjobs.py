@@ -114,7 +114,7 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
         )
         
         response.set_accepted(
-            msg='Request accepted, scheduling jobs'
+            msg=f"Request accepted, created batch job <{batch_job_dep.name}> -> Scheduling jobs"
         )
         
         return Response(response.to_dict(),
@@ -169,6 +169,49 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
                             status=status.HTTP_202_ACCEPTED)
     
     
+    def patch(self, request, batch_job_name):
+        """
+        Stop / resume the batch jobs by name
+        """
+        response = KuberosResponse()
+        cmd = request.data.get('cmd', None)
+        
+        # reject if cmd is not provided correctly
+        if cmd not in ['stop', 'resume']: 
+            response.set_rejected(
+                reason='InvalidCommand',
+                err_msg=f"Invalid command <{cmd}>. Supported: 'stop', 'resume'")
+            return Response(response.to_dict(),
+                            status=status.HTTP_202_ACCEPTED)
+        
+        # get the batch job
+        try:
+            bj_dep = BatchJobDeployment.objects.get(
+                name=batch_job_name,
+                is_active=True,
+            )
+        except BatchJobDeployment.DoesNotExist:
+            response.set_rejected(
+                reason='BatchJobDeploymentNotExist',
+                err_msg=f'Batch job deployment <{batch_job_name}> does not exist.'
+            )
+    
+        # stop the batch job
+        if cmd == 'stop':
+            print("Stop the batch job")
+            
+            response.set_success()
+            return Response(response.to_dict(),
+                            status=status.HTTP_200_OK)
+        
+        if cmd == 'resume':
+            print("Resume the batch job")
+            
+            response.set_success()
+            return Response(response.to_dict(),
+                            status=status.HTTP_200_OK)
+        
+
     def delete(self, request, batch_job_name):
         """
         Delete the batch jobs by name

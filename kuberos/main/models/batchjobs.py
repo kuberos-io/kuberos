@@ -38,11 +38,10 @@ from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.utils.timesince import timesince
-from django.contrib.auth.models import User
 from django.utils.crypto import get_random_string
 
 # KubeROS 
-from main.models.base import UserRelatedBaseModel, get_sentinel_user
+from main.models.base import UserRelatedBaseModel
 from main.models import Cluster
 
 
@@ -58,6 +57,12 @@ class BatchJobDeployment(UserRelatedBaseModel):
         PENDING = 'PENDING', _('pending')
         # Entire batch job deployment is in executing. This process may take a long time.
         EXECUTING = 'EXECUTING', _('Batch jobs in executing')
+        
+        # Stop the execution, instead of deleting the deployment.
+        STOPPED = 'STOPPED', _('Batch jobs stopped')
+        
+        # Finished: All jobs are completed.
+        FINISHED = 'FINISHED', _('Batch jobs finished')
         
         # Clearning the deployed global resources
         #  - configmaps per job queue
@@ -199,12 +204,29 @@ class BatchJobDeployment(UserRelatedBaseModel):
         self.started_at = timezone.now()
         self.save()
     
+    def switch_status_to_finished(self):
+        """
+        All jobs are completed.
+        Next: clean the global resources
+        """
+        self.status = BatchJobDeployment.StatusChoices.FINISHED
+        self.save()
+    
+    def switch_status_to_cleaning(self):
+        self.status = BatchJobDeployment.StatusChoices.CLEANING
+        self.save()
+    
+    def switch_status_to_stoped(self):
+        self.status = BatchJobDeployment.StatusChoices.STOPPED
+        self.save()
+    
     def switch_status_to_completed(self):
         self.status = BatchJobDeployment.StatusChoices.COMPLETED
         self.completed_at = timezone.now()
         self.save()
         
         logger.debug("Batch job deployment completed in %s", (self.completed_at - self.started_at).seconds)
+
 
     @property
     def started_since(self):
@@ -213,6 +235,7 @@ class BatchJobDeployment(UserRelatedBaseModel):
         if self.status == self.StatusChoices.COMPLETED:
             return 'Completed'
         return timesince(self.started_at)
+
 
     @property
     def execution_time(self):
@@ -277,6 +300,13 @@ class BatchJobGroup(models.Model):
         null=True,        
     )
     
+    logs = models.JSONField(
+        blank=True,
+        null=True,
+        default=list,
+    )
+
+
     def get_uuid(self) -> str:
         return str(self.uuid)
     
@@ -292,7 +322,7 @@ class BatchJobGroup(models.Model):
     
     def get_next_jobs(self, num=1):
         """
-        Get jobs to run.
+        Get pending jobs to be scheduled.
         """
         jobs = []
 
@@ -303,29 +333,31 @@ class BatchJobGroup(models.Model):
             jobs = jobs_in_pending[:num]
         else:
             jobs = jobs_in_pending
-        
+
         jobs_manifest = [job.get_job_description_for_scheduling() for job in jobs]    
-        
+
         return jobs_manifest
-    
+
     def get_pending_jobs_num(self) -> int:
         return self.batch_kuberos_job_set.filter(job_status=KuberosJob.StatusChoices.PENDING).count()
-    
+
     @property
     def job_statistics(self) -> dict:
         completed = self.batch_kuberos_job_set.filter(job_status=KuberosJob.StatusChoices.COMPLETED).count()
         pending = self.batch_kuberos_job_set.filter(job_status=KuberosJob.StatusChoices.PENDING).count()
-        failed = self.batch_kuberos_job_set.filter(job_status=KuberosJob.StatusChoices.FAILED).count()
-        processing = self.batch_kuberos_job_set.all().count() - completed - pending - failed
+        failed = self.batch_kuberos_job_set.filter(job_status=KuberosJob.StatusChoices.COMPLETED,
+                                                   success_completed=False).count()
+        processing = self.batch_kuberos_job_set.all().count() - completed - pending
         return {
             'queue_name': f'{self.group_postfix}',
             'exec_cluster': f'{self.exec_cluster.cluster_name}',
             'is_finished': True if processing == 0 else False,
-            'success': completed,
+            'completed': completed,
             'pending': pending,
             'failed': failed,
             'processing': processing,
         }
+
 
 
 class KuberosJob(models.Model):
@@ -354,7 +386,8 @@ class KuberosJob(models.Model):
         COMPLETED = 'COMPLETED', _('job executiong completed')
         # Job failed
         FAILED = 'FAILED', _('job failed')
-    
+
+
     uuid = models.UUIDField(
         primary_key=True,
         editable=False, 
@@ -460,18 +493,19 @@ class KuberosJob(models.Model):
     )
     
     ### MESSAGES ###
-    job_msgs = models.JSONField(
+    success_completed = models.BooleanField(
+        default=True
+    )
+    
+    logs = models.JSONField(
         null=True,
         blank=True,
         default=list,
     )
 
+
     def get_uuid(self) -> str:
         return str(self.uuid)
-
-    def add_error_msg(self, msg: str) -> None:
-        self.job_msgs.append({'error': msg})
-        # self.save()
 
     def update_scheduled_result(self, 
                                 sc_result: dict) -> None:
@@ -482,6 +516,8 @@ class KuberosJob(models.Model):
         self.scheduled_at = timezone.now()
         
         self.job_status = self.StatusChoices.SCHEDULED
+        
+        self.logs.append({'Scheduling': f"[INFO] {self.scheduled_at} - Job scheduled to cluster node {sc_result['cluster_node_info']}"})
         
         self.save()
         
@@ -554,11 +590,15 @@ class KuberosJob(models.Model):
     def switch_status_to_completed(self):
         self.completed_at = timezone.now()
         self.job_status = self.StatusChoices.COMPLETED
+        self.logs.append({'[INFO]': f'Job completed in {(self.completed_at-self.deployment_started_at).seconds} secs'})
         self.save()
     
     def switch_status_to_failed(self, err_msg: str):
-        self.job_msgs = {'error': err_msg}
-        self.job_status = self.StatusChoices.FAILED
+        self.success_completed = False
+        
+        # switch to state finished, which will trigger the termination of the job
+        self.job_status = self.StatusChoices.FINISHED
+        
         self.save()
 
 
@@ -614,7 +654,8 @@ class KuberosJob(models.Model):
                 self.switch_status_to_completed()
                 
         return action
-        
+
+
     def is_lifecycle_module_completed(self) -> bool:
         pod_name = f'{self.batch_job_group.group_postfix}-{self.batch_job_group.lifecycle_rosmodule_name}-{self.slug}'
         # print("lifecycle module pod name: ", pod_name)
@@ -624,8 +665,8 @@ class KuberosJob(models.Model):
                 if pod['status'] == 'Succeeded':
                     return True
         return False        
-        
-    
+
+
     def is_discovery_servers_ready(self) -> bool:
         """
         Check if all discovery servers are ready.
@@ -641,6 +682,7 @@ class KuberosJob(models.Model):
         except:
             return False
 
+
     def is_all_rosmodules_ready(self) -> bool:
         try: 
             for pod in self.pod_status:
@@ -652,6 +694,7 @@ class KuberosJob(models.Model):
         except:
             return False
 
+
     def is_any_rosmodules_failed(self) -> bool: 
         try:
             for pod in self.pod_status:
@@ -662,6 +705,7 @@ class KuberosJob(models.Model):
         except:
             return False
 
+
     def is_all_modules_not_found(self) -> bool:
         try:    
             for pod in self.pod_status:
@@ -671,13 +715,15 @@ class KuberosJob(models.Model):
         except:
             return False
 
+
     def get_all_deployed_pods(self) -> list:
         pod_name_list = []
         
         for status in self.pod_status:
             pod_name_list.append(status['name'])
         return pod_name_list
-    
+
+
     def get_all_deployed_svcs(self) -> list:
         
         return [self.scheduled_disc_server['svc']['metadata']['name']]

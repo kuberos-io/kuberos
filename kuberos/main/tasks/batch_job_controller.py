@@ -124,17 +124,7 @@ def create_kuberos_jobs(
             continue
 
 
-# Database operations
-# @transaction.atomic
-def update_scheduling_result(scheduled_jobs: list) -> None:
-    """
-    Update the scheduling result to the database.
-    """
-    for job in scheduled_jobs:
-        logger.debug("[Update Scheduling Result] Job: %s", job['job_uuid'])
-        
-        job_obj = KuberosJob.objects.get(uuid=job['job_uuid'])
-        job_obj.update_scheduled_result(sc_result=job)
+
 
 
 @shared_task()
@@ -191,6 +181,20 @@ def generate_job_queues(
     batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
                                                 countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD)
 
+
+# Database operations
+# @transaction.atomic
+def update_scheduling_result(scheduled_jobs: list) -> None:
+    """
+    Update the scheduling result to the database.
+    """
+    for job in scheduled_jobs:
+        logger.debug("[Update Scheduling Result] Job: %s", job['job_uuid'])
+        
+        job_obj = KuberosJob.objects.get(uuid=job['job_uuid'])
+        job_obj.update_scheduled_result(sc_result=job)
+        
+        
 
 # Change name to scheduling_batch_jobs
 @shared_task()
@@ -276,23 +280,33 @@ def batch_job_cleaning(batch_job_dep_uuid: str) -> None:
 
     logger.debug("[Batch Job Deployment] Cleaning %s", batch_job_dep.name)
     
+    batch_job_dep.switch_status_to_cleaning()
+    
+    cleaning_completed = True
+    
     for job_group in batch_job_dep.batch_job_group_set.all():
         kube_exec = KuberosExecuter(kube_config=job_group.exec_cluster.cluster_config_dict)
         response = kube_exec.delete_deployed_configmaps(configmap_list=job_group.configmaps)
         
+        # set cleaning_completed to False
         if not response['status'] == 'success':
             logger.error("[Batch Job Deployment] Failed to delete configmaps in queue <%s>", job_group.group_postfix)
             logger.error(response['errors'])
-        # TODO: add error handling
-        #    batch_job_dep.status = BatchJobDeployment.StatusChoices.FAILED
-        #    batch_job_dep.save()
-        #    return False
+            job_group.add_error_msg(response['errors'])
+            cleaning_completed = False
+     
+    # update batch job status
+    if cleaning_completed:
+        batch_job_dep.switch_status_to_completed()
+        batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,))
 
-    # back to workflow control
-    batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
-                                             countdown=3)
+    else:
+        # back to workflow control
+        # try to clean again
+        batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
+                                                countdown=3)
 
-
+    
 @shared_task()
 def batch_job_deployment_control(batch_job_dep_uuid: str) -> None:
     """
@@ -318,20 +332,24 @@ def batch_job_deployment_control(batch_job_dep_uuid: str) -> None:
         
         if batch_jobs_statistic['num_processing'] == 0 and batch_jobs_statistic['num_pending'] == 0:
             logger.info("[Batch Job Deployment] All jobs are finished, switch to cleaning")
-            batch_job_dep.status = BatchJobDeployment.StatusChoices.CLEANING
-            batch_job_dep.save()
+            batch_job_dep.switch_status_to_finished()
         
         scheduling_batch_jobs.delay(batch_job_dep_uuid=batch_job_dep_uuid)
-        
-    if status == BatchJobDeployment.StatusChoices.CLEANING:
-        
-        batch_job_cleaning.delay(batch_job_dep_uuid=batch_job_dep_uuid)
+    
+    if status == BatchJobDeployment.StatusChoices.FINISHED:
+        # trigger the cleaning process
         logger.info("[Batch Job Deployment] Cleaning deployed resources")
-        # TODO: Check the cleaning status
-        batch_job_dep.switch_status_to_completed()
+        batch_job_cleaning.delay(batch_job_dep_uuid=batch_job_dep_uuid)
 
+    
+    if status == BatchJobDeployment.StatusChoices.CLEANING:
+        # check the cleaning status
+        logger.info("[Batch Job Deployment] Cleaning deployed resources")
+        batch_job_cleaning.delay(batch_job_dep_uuid=batch_job_dep_uuid)
+
+    # Completed
     if status == BatchJobDeployment.StatusChoices.COMPLETED:
-        logger.info("[Batch Job Deployment] Cleaned, archieve the deployment.")
+        logger.info("[Batch Job Deployment] Batchjob completed.")
 
 
 
