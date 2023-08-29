@@ -28,7 +28,8 @@ class BatchJobDeploymentSerializer(serializers.ModelSerializer):
         model = BatchJobDeployment
         
         fields = ['name', 'is_active', 'status', 
-                  'job_spec', 'exec_clusters',
+                  'job_spec', 'exec_clusters', 'get_job_statistics',
+                  'started_since', 'execution_time',
                   'batch_job_group_set',
                   ]
         

@@ -23,6 +23,7 @@ from main.tasks.batch_job_controller import (
 
 
 logger = logging.getLogger('kuberos.main.api')
+logger.propagate = False
 
 
 DEFAULT_STARTUP_TIMEOUT = 66
@@ -92,6 +93,16 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
             cluster_obj = Cluster.objects.get(cluster_name=cluster)
             exec_clusters.append(cluster_obj)
 
+        # volume 
+        volume_spec = job_spec.get('volume', None)
+        if volume_spec:
+            host_path = f"/kuberos/data/batchjobs/{meta_data['name']}"
+            volume = self.parse_volume(volume_spec=volume_spec, 
+                                           host_path=host_path,
+                                           subpath=meta_data['name'])
+        else:
+            volume = {}
+
         # create batch job deployment
         batch_job_dep = BatchJobDeployment.objects.create(
             name=meta_data['name'],
@@ -100,6 +111,7 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
             job_spec=job_spec,
             startup_timeout = job_spec.get('startupTimeout', DEFAULT_STARTUP_TIMEOUT),
             running_timeout = job_spec.get('runningTimeout', DEFAULT_RUNNING_TIMEOUT),
+            volume_spec = volume,
         )
         
         # Add clusters 
@@ -195,27 +207,59 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
                 reason='BatchJobDeploymentNotExist',
                 err_msg=f'Batch job deployment <{batch_job_name}> does not exist.'
             )
+
+        bj_status = bj_dep.status
+        
     
-        # stop the batch job
+        ### Stop the batch job
         if cmd == 'stop':
-            print("Stop the batch job")
+            logger.info(f"Stopping batch job <%s>", batch_job_name)
             
-            response.set_success()
-            return Response(response.to_dict(),
-                            status=status.HTTP_200_OK)
+            # reject if the batch job is not running
+            if bj_status != BatchJobDeployment.StatusChoices.EXECUTING:
+                response.set_rejected(
+                    reason='BatchJobNotRunning',
+                    err_msg=f'Batch job deployment <{batch_job_name}> is in status <{bj_status}>. Cannot stop it.'
+                )
+                return Response(response.to_dict(), status=status.HTTP_202_ACCEPTED)
+            
+            else:
+                bj_dep.switch_status_to_stopped()
+                response.set_accepted(
+                    msg=f"Request accepted, Stopping batch job <{batch_job_name}>"
+                )
+                return Response(response.to_dict(),
+                                status=status.HTTP_200_OK)
         
+        ### Resume the batch job
         if cmd == 'resume':
-            print("Resume the batch job")
+            logger.info(f"Resuming batch job <%s>", batch_job_name)
             
-            response.set_success()
-            return Response(response.to_dict(),
-                            status=status.HTTP_200_OK)
-        
+            # reject if the batch job is not running
+            if bj_status != BatchJobDeployment.StatusChoices.STOPPED:
+                response.set_rejected(
+                    reason='BatchJobNotInStoppedStatus',
+                    err_msg=f'Batch job deployment <{batch_job_name}> is in status <{bj_status}>. Cannot resume it.'
+                )
+                return Response(response.to_dict(), status=status.HTTP_202_ACCEPTED)
+            
+            else:
+                bj_dep.switch_status_back_to_executing()
+                batch_job_deployment_control.delay(
+                    batch_job_dep_uuid=bj_dep.get_uuid()
+                )
+                response.set_accepted(
+                    msg=f"Request accepted, Resuming batch job <{batch_job_name}>"
+                )
+                return Response(response.to_dict(),
+                                status=status.HTTP_200_OK)
+
 
     def delete(self, request, batch_job_name):
         """
         Delete the batch jobs by name
         """
+        is_hard_delete = request.data.get('hard_delete', False)
         
         response = KuberosResponse()
         
@@ -233,9 +277,114 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
             return Response(response.to_dict(),
                             status=status.HTTP_202_ACCEPTED)
         
-        # terminate and delete the batch jobs
-        bj_dep.delete()
-        response.set_success()
-        
+        # delete the batch jobs
+        if is_hard_delete:
+            logger.info(f"Delete batch job <%s> from database!", batch_job_name)
+            bj_dep.delete()
+            response.set_success(
+                msg=f"Hard deleting batch job <{batch_job_name}> successfully! Deleted from database."
+            )
+            return Response(response.to_dict(),
+                            status=status.HTTP_200_OK)
+
+        # soft delete
+        bj_status = bj_dep.status
+        if bj_status not in [BatchJobDeployment.StatusChoices.PENDING,
+                             BatchJobDeployment.StatusChoices.COMPLETED,
+                             BatchJobDeployment.StatusChoices.FAILED]:
+            bj_dep.switch_status_to_cleaning()
+            # trigger the deleting process
+            batch_job_deployment_control.delay(
+                    batch_job_dep_uuid=bj_dep.get_uuid()
+                )
+            response.set_accepted(
+                msg=f"Request accepted, Deleting batch job <{batch_job_name}>, Current state: {bj_status}"
+            )
+            return Response(response.to_dict(),
+                            status=status.HTTP_202_ACCEPTED)
+            
+        bj_dep.is_active = False
+        bj_dep.save()
+        response.set_success(
+            msg=f"Soft deleting batch job <{batch_job_name}> successfully!"
+        )
         return Response(response.to_dict(),
                         status=status.HTTP_200_OK)
+        
+        
+        
+    @staticmethod
+    def parse_volume(volume_spec: dict, host_path: str, subpath: str) -> dict:
+        """
+        Parse volume spec
+        """
+        if not volume_spec:
+            return {}
+
+        volume_name = volume_spec.get('name', 'temp-volume-for-batchjob')
+
+        volume = {}
+        volume_mount = {}
+        if volume_spec['type'] == 'localhost':
+            volume = {
+                'name': volume_name,
+                'hostPath': {
+                    'path': host_path,
+                    'type': 'DirectoryOrCreate'
+                }
+            }
+            volume_mount = {
+                'name': volume_name,
+                'mountPath': volume_spec['mountPath'],
+            }
+        
+        if volume_spec['type'] == 'nfs':
+            volume = {
+                'name': 'nfs-volume',
+                'nfs': {
+                    'server': volume_spec['nfsServer'],
+                    'path': '/srv/nfs4'
+                }
+            }
+            volume_mount = {
+                'name': 'nfs-volume',
+                'mountPath': volume_spec['mountPath'],
+                # 'readOnly': 'no',
+                'subPath': subpath
+            }
+
+        return {
+            'volume': volume,
+            'volume_mount': volume_mount
+        }
+
+
+class BatchJobDataManagementViewSet(viewsets.ViewSet):
+    
+    def retrieve(self, request, batch_job_name):
+        """
+        Request to collect the batch job data
+        """
+        
+        response = KuberosResponse()
+        
+        try:
+            batch_job = BatchJobDeployment.objects.get(name=batch_job_name,
+                                                       is_active=True)
+            
+            serializer = BatchJobDeploymentSerializer(batch_job)
+            
+            response.set_data(serializer.data)
+            response.set_success()
+            return Response(response.to_dict(),
+                            status=status.HTTP_200_OK)
+        
+        # return error msg, if the batch job does not exist
+        except BatchJobDeployment.DoesNotExist:
+            logger.warning(f'Batch job {batch_job_name} does not exist')
+            response.set_failed(
+                reason='BatchJobDeploymentNotExist',
+                err_msg=f'Batch job {batch_job_name} does not exist'
+            )
+            return Response(response.to_dict(),
+                            status=status.HTTP_202_ACCEPTED)

@@ -32,10 +32,10 @@ logger = logging.getLogger('kuberos.main.tasks')
 logger.propagate = False
 
 
-DEFAULT_JOB_CHECK_PERIOD = 1 # seconds
+DEFAULT_JOB_CHECK_PERIOD = 2 # seconds
 DEFAULT_JOB_CHECK_PERIOD_AT_RUNNING = 2 # seconds - reduce the check frequency
 
-DEFAULT_BATCH_JOB_SCHEDULING_PERIOD = 1 # seconds
+DEFAULT_BATCH_JOB_SCHEDULING_PERIOD = 3 # seconds
 
 
 
@@ -118,13 +118,11 @@ def create_kuberos_jobs(
                 slug = f"{get_random_string(length=10, allowed_chars='abcdefghijklmnopqrstuvwxyz')}",
                 startup_timeout = batch_job_group.deployment.startup_timeout,
                 running_timeout = batch_job_group.deployment.running_timeout,
+                volume = batch_job_group.deployment.volume_spec,
             )
             repeat_num -= 1
         except IntegrityError:
             continue
-
-
-
 
 
 @shared_task()
@@ -136,7 +134,7 @@ def generate_job_queues(
     Combination of varyingParameter.
 
     """
-    logger.debug("[Batch Job] Generate job queues")
+    logger.debug("[Generate Job Queues] Start to generate job queues")
     
     batch_job_dep = BatchJobDeployment.objects.get(uuid=batch_job_dep_uuid)
     
@@ -179,7 +177,7 @@ def generate_job_queues(
     
     # back to the workflow control
     batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
-                                                countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD)
+                                             countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD)
 
 
 # Database operations
@@ -189,11 +187,10 @@ def update_scheduling_result(scheduled_jobs: list) -> None:
     Update the scheduling result to the database.
     """
     for job in scheduled_jobs:
-        logger.debug("[Update Scheduling Result] Job: %s", job['job_uuid'])
         
         job_obj = KuberosJob.objects.get(uuid=job['job_uuid'])
         job_obj.update_scheduled_result(sc_result=job)
-        
+    logger.debug("[Batch Job Scheduling] Updating results in DB is finished.")
         
 
 # Change name to scheduling_batch_jobs
@@ -211,7 +208,7 @@ def scheduling_batch_jobs(
     
     batch_job_dep = BatchJobDeployment.objects.get(uuid=batch_job_dep_uuid)
 
-    logger.debug("[Scheduling Jobs] - %s ", batch_job_dep.name)
+    logger.debug("[Batch Job Scheduling] - Scheduling: %s ", batch_job_dep.name)
     
     # Scheduling new jobs:
     scheduled_clusters_name = []
@@ -221,18 +218,18 @@ def scheduling_batch_jobs(
         # check pending jobs
         # if no pending jobs, skip
         pending_num = job_group.get_pending_jobs_num()
-        logger.debug("[Scheduling Batch Jobs] Job queue <%s> - pending jobs : %s",
+        logger.debug("[Batch Job Scheduling] Job queue <%s> - pending jobs : %s",
                       job_group.group_postfix, pending_num)
         
         if pending_num == 0:
-            logger.debug("[Scheduling Batch Jobs] Skip this job queue <%s>", 
+            logger.debug("[Batch Job Scheduling] Skip this job queue <%s>", 
                          job_group.group_postfix)
             continue
             
         exec_cluster = job_group.exec_cluster
         
         if exec_cluster.cluster_name in scheduled_clusters_name:
-            logger.debug("[Scheduling Batch Jobs] This cluster <%s> is already scheduled", 
+            logger.debug("[Batch Job Scheduling] This cluster <%s> is already scheduled", 
                          exec_cluster.cluster_name)
             continue
         
@@ -245,11 +242,10 @@ def scheduling_batch_jobs(
         c_state = exec_cluster.get_cluster_state_for_batchjobs()
         numb_of_allocatable_nodes = c_state['num_of_allocatable_nodes']
         
-        logger.debug("[Scheduling Batch Jobs] Exec cluster : %s", scheduled_clusters_name)
-        logger.debug("[Scheduling Batch Jobs] num_of_allocatable_nodes: %s", 
+        logger.debug("[Batch Job Scheduling] Exec cluster : %s", scheduled_clusters_name)
+        logger.debug("[Batch Job Scheduling] num_of_allocatable_nodes: %s", 
                      numb_of_allocatable_nodes)
-        logger.debug("[Scheduling Batch Jobs] Cluster state: %s", 
-                     c_state)
+        # logger.debug("[Scheduling Batch Jobs] Cluster state: %s", c_state)
 
         next_jobs = job_group.get_next_jobs(num=numb_of_allocatable_nodes)
         
@@ -271,16 +267,14 @@ def scheduling_batch_jobs(
     batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
                                         countdown=DEFAULT_BATCH_JOB_SCHEDULING_PERIOD)
     
-    logger.debug("[Scheduling Batch Jobs] Finish.")
+    logger.debug("[Batch Job Scheduling] This iteration finished.")
 
 @shared_task()
 def batch_job_cleaning(batch_job_dep_uuid: str) -> None:
     
     batch_job_dep = BatchJobDeployment.objects.get(uuid=batch_job_dep_uuid)
 
-    logger.debug("[Batch Job Deployment] Cleaning %s", batch_job_dep.name)
-    
-    batch_job_dep.switch_status_to_cleaning()
+    logger.debug("[Batch Job Cleaning] Cleaning %s", batch_job_dep.name)
     
     cleaning_completed = True
     
@@ -290,19 +284,28 @@ def batch_job_cleaning(batch_job_dep_uuid: str) -> None:
         
         # set cleaning_completed to False
         if not response['status'] == 'success':
-            logger.error("[Batch Job Deployment] Failed to delete configmaps in queue <%s>", job_group.group_postfix)
+            logger.error("[Batch Job Clearning] Failed to delete configmaps in queue <%s>", job_group.group_postfix)
             logger.error(response['errors'])
             job_group.add_error_msg(response['errors'])
             cleaning_completed = False
-     
+    
+    # clean unfinished jobs
+    unfinished_jobs = batch_job_dep.get_all_unfinished_jobs()
+    logger.warning("[Batch Job Cleaning] Unfinished jobs: %s", unfinished_jobs)
+    for job in unfinished_jobs:
+        logger.warning("[Batch Job Cleaning] Terminating unfinished job <%s>", job.slug)
+        single_job_terminating.apply_async(args=(job.uuid,))
+        cleaning_completed = False
+        
     # update batch job status
     if cleaning_completed:
         batch_job_dep.switch_status_to_completed()
+        logger.debug("[Batch Job Cleaning] Cleaning success, switch to completed")
         batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,))
-
+        
     else:
+        logger.warning("[Batch Job Cleaning] Not finished, check again in %s secs", 3)
         # back to workflow control
-        # try to clean again
         batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
                                                 countdown=3)
 
@@ -317,7 +320,7 @@ def batch_job_deployment_control(batch_job_dep_uuid: str) -> None:
     batch_job_dep = BatchJobDeployment.objects.get(uuid=batch_job_dep_uuid)
     status = batch_job_dep.status
     
-    logger.debug("[Batch Job Deployment] Workflow control - Status: %s", status)
+    logger.debug("[Batch Job Deployment] Workflow - State: %s", status)
     
     # if in pending status, trigger the job units generation.
     if status == BatchJobDeployment.StatusChoices.PENDING:
@@ -328,19 +331,46 @@ def batch_job_deployment_control(batch_job_dep_uuid: str) -> None:
         # check job status
         batch_jobs_statistic = batch_job_dep.get_job_statistics()
         
-        logger.info("[Batch Job Deployment] Job statistics: %s", batch_jobs_statistic)
+        num_pending = batch_jobs_statistic['num_pending']
         
-        if batch_jobs_statistic['num_processing'] == 0 and batch_jobs_statistic['num_pending'] == 0:
-            logger.info("[Batch Job Deployment] All jobs are finished, switch to cleaning")
-            batch_job_dep.switch_status_to_finished()
-        
-        scheduling_batch_jobs.delay(batch_job_dep_uuid=batch_job_dep_uuid)
+        if num_pending == 0:
+            logger.debug("[Scheduling Batch Jobs] No pending jobs, switch to wait for finishing")
+            batch_job_dep.switch_status_to_waiting_for_finishing()
+            # Check the batch job deployment state in 5 seconds
+            batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
+                                                     countdown=5)
+        else:
+            logger.info("[Batch Job Deployment] Pending: %s, In Processing: %s -> Schedule new jobs", 
+                    num_pending,
+                    batch_jobs_statistic['num_processing'])
+            scheduling_batch_jobs.delay(batch_job_dep_uuid=batch_job_dep_uuid)
     
+    if status == BatchJobDeployment.StatusChoices.WAITING_FOR_FINISHING:
+        
+        batch_jobs_statistic = batch_job_dep.get_job_statistics()
+        
+        num_processing = batch_jobs_statistic['num_processing']
+        
+        if num_processing == 0:
+            logger.info("[Batch Job Deployment] All jobs are finished, switch to cleaning")
+            batch_job_dep.switch_status_to_cleaning()
+            
+            
+        if batch_job_dep.chech_timeout_waiting_for_finishing():
+            logger.info("[Batch Job Deployment] Timeout waiting for finishing, force switch to cleaning")
+            batch_job_dep.switch_status_to_cleaning()
+
+        batch_job_deployment_control.apply_async(args=(batch_job_dep_uuid,),
+                                                 countdown=5)
+        
+    # DEPRECATED
     if status == BatchJobDeployment.StatusChoices.FINISHED:
         # trigger the cleaning process
         logger.info("[Batch Job Deployment] Cleaning deployed resources")
         batch_job_cleaning.delay(batch_job_dep_uuid=batch_job_dep_uuid)
 
+    if status == BatchJobDeployment.StatusChoices.STOPPED:
+        logger.warning("[Batch Job Deployment] Received stop signal, stop scheduling new jobs")
     
     if status == BatchJobDeployment.StatusChoices.CLEANING:
         # check the cleaning status
@@ -350,9 +380,6 @@ def batch_job_deployment_control(batch_job_dep_uuid: str) -> None:
     # Completed
     if status == BatchJobDeployment.StatusChoices.COMPLETED:
         logger.info("[Batch Job Deployment] Batchjob completed.")
-
-
-
 
 
 @shared_task()
@@ -494,6 +521,42 @@ def single_job_terminating(job_uuid: str) -> None:
                                      countdown=DEFAULT_JOB_CHECK_PERIOD)
 
 
+@shared_task()
+def force_job_terminating(job_uuid: str) -> None:
+    """
+    Terminate the single job.
+    """
+    job = KuberosJob.objects.get(uuid=job_uuid)
+    
+    logger.debug("[Job Termintating] - Terminating <%s>", job.slug)
+    
+    kube_config = job.batch_job_group.exec_cluster.cluster_config_dict
+    kube_exec = KuberosExecuter(kube_config=kube_config)
+    
+    pod_list = job.get_all_deployed_pods()
+    svc_list = job.get_all_deployed_svcs()
+    
+    response = kube_exec.delete_rosmodules(
+        pod_list=pod_list,
+        svc_list=svc_list
+    )
+
+    if response['status'] == 'success':
+        logger.debug("[Job Termintating] ROS modules deleted")
+        job.job_status = KuberosJob.StatusChoices.TERMINATING
+        job.save()
+
+    else:
+        logger.error("[Job Termintating] Failed to delete ROS modules")
+        logger.error(response['errors'])
+        job.add_error_msg(response['errors'])
+        job.job_status = KuberosJob.StatusChoices.FAILED
+        job.save()
+    
+    # back to the workflow control
+    job_workflow_control.apply_async(args=(job_uuid,),
+                                     countdown=DEFAULT_JOB_CHECK_PERIOD)
+
 
 @shared_task()
 def job_workflow_control(job_uuid: str) -> None:
@@ -532,8 +595,8 @@ def job_workflow_control(job_uuid: str) -> None:
                     job_uuid, job.job_status)
 
     else:
-        job.add_error_msg("Job is in unknown status")
         logger.warning("[Job Workflow Control] Job <%s> is in unknown status: %s")
 
 
 
+# Job_watch_dog

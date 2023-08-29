@@ -55,8 +55,12 @@ class BatchJobDeployment(UserRelatedBaseModel):
 
         # Entire batch job deployment is in pending. Due to no cluster is free or available.
         PENDING = 'PENDING', _('pending')
+        
         # Entire batch job deployment is in executing. This process may take a long time.
         EXECUTING = 'EXECUTING', _('Batch jobs in executing')
+        
+        # Wait for finishing the running jobs.
+        WAITING_FOR_FINISHING = 'WAITING_FOR_FINISHING', _('Waiting for finishing the running jobs')
         
         # Stop the execution, instead of deleting the deployment.
         STOPPED = 'STOPPED', _('Batch jobs stopped')
@@ -96,6 +100,11 @@ class BatchJobDeployment(UserRelatedBaseModel):
         blank=False,
         null=False,
         verbose_name='Job Specification'
+    )
+    
+    volume_spec = models.JSONField(
+        blank=True,
+        null=True,
     )
     
     deployment_manifest = models.JSONField(
@@ -139,6 +148,18 @@ class BatchJobDeployment(UserRelatedBaseModel):
         blank=True,
         null=True
     )
+    
+    scheduling_done_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+    
+    logs = models.JSONField(
+        blank=True,
+        null=True,
+        default=list,
+    )
+    
     
     class Meta:
         constraints = [
@@ -188,7 +209,28 @@ class BatchJobDeployment(UserRelatedBaseModel):
             'num_processing': num_processing,
             'queues': queues
         }
-        
+    
+    def get_all_unfinished_jobs(self):
+        jobs = []
+        for group in self.batch_job_group_set.all():
+            jobs.extend(group.batch_kuberos_job_set.exclude(job_status=KuberosJob.StatusChoices.COMPLETED))
+        return jobs
+    
+    def chech_timeout_waiting_for_finishing(self):
+        """
+        Check the timeout of the entire deployment.
+        If timeout, switch to force cleaning.
+        """
+        if not self.scheduling_done_at:
+            self.logs.append({'[Error]': f'[WAITING_FOR_FINISHING] Scheduling done time is not found. Set to now.'})
+            self.scheduling_done_at = timezone.now()
+            self.save()
+            
+        if self.status == self.StatusChoices.WAITING_FOR_FINISHING:
+            if (timezone.now() - self.scheduling_done_at).seconds > self.running_timeout + self.startup_timeout:
+                return True
+        return False
+    
     def get_all_configmaps(self):
         """
         Get all configmaps
@@ -203,6 +245,11 @@ class BatchJobDeployment(UserRelatedBaseModel):
         self.status = BatchJobDeployment.StatusChoices.EXECUTING
         self.started_at = timezone.now()
         self.save()
+        
+    def switch_status_to_waiting_for_finishing(self):
+        self.status = BatchJobDeployment.StatusChoices.WAITING_FOR_FINISHING
+        self.scheduling_done_at = timezone.now()
+        self.save()
     
     def switch_status_to_finished(self):
         """
@@ -216,8 +263,12 @@ class BatchJobDeployment(UserRelatedBaseModel):
         self.status = BatchJobDeployment.StatusChoices.CLEANING
         self.save()
     
-    def switch_status_to_stoped(self):
+    def switch_status_to_stopped(self):
         self.status = BatchJobDeployment.StatusChoices.STOPPED
+        self.save()
+    
+    def switch_status_back_to_executing(self):
+        self.status = BatchJobDeployment.StatusChoices.EXECUTING
         self.save()
     
     def switch_status_to_completed(self):
@@ -383,7 +434,7 @@ class KuberosJob(models.Model):
         
         # Terminating state
         # Change to completed after all resources are deleted
-        COMPLETED = 'COMPLETED', _('job executiong completed')
+        COMPLETED = 'COMPLETED', _('job execution completed')
         # Job failed
         FAILED = 'FAILED', _('job failed')
 
@@ -452,6 +503,24 @@ class KuberosJob(models.Model):
         verbose_name='Service status'
     )
     
+    # executed on which cluster node
+    node_status = models.JSONField(
+        null=True,
+        blank=True,
+        default=list,
+    )
+    
+    # volume to be attached to the job
+    # {   'name': 'volume-name',
+    #       'mountPath': '/path/to/mount',
+    #       'hostPath': 'sub/path/to/mount',
+    # }
+    volume = models.JSONField(
+        null=True,
+        blank=True,
+        default=dict,
+    )
+    
     ### TIMESTAMP ###
     last_check_time = models.DateTimeField(
         default=timezone.now
@@ -516,6 +585,7 @@ class KuberosJob(models.Model):
         self.scheduled_at = timezone.now()
         
         self.job_status = self.StatusChoices.SCHEDULED
+        self.node_status = sc_result['cluster_node_info']
         
         self.logs.append({'Scheduling': f"[INFO] {self.scheduled_at} - Job scheduled to cluster node {sc_result['cluster_node_info']}"})
         
@@ -531,6 +601,7 @@ class KuberosJob(models.Model):
             'group_postfix': self.batch_job_group.group_postfix,
             'job_postfix': self.slug,
             'manifest': self.batch_job_group.deployment_manifest,
+            'volume': self.volume,
         }
         return res
 
@@ -590,7 +661,10 @@ class KuberosJob(models.Model):
     def switch_status_to_completed(self):
         self.completed_at = timezone.now()
         self.job_status = self.StatusChoices.COMPLETED
-        self.logs.append({'[INFO]': f'Job completed in {(self.completed_at-self.deployment_started_at).seconds} secs'})
+        if self.completed_at and self.running_at:
+            self.logs.append({'[INFO]': f'Job completed in {(self.completed_at-self.deployment_started_at).seconds} secs'})
+        else:
+            self.logs.append({'[Error]': f'Job completed, but no running time recorded: Started: {self.deployment_started_at}, Completed: {self.completed_at}'})
         self.save()
     
     def switch_status_to_failed(self, err_msg: str):
