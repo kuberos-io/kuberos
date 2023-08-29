@@ -15,16 +15,28 @@ At the current stage of development, we are using multiple yaml files instead of
 All pods are deployed on the master node using node selector. A directory on the host is used for persistent storage. 
 
 You can use `kubectl apply -f' to deploy the following resources in the cluster
+ 
+ - To add a temporary Docker Hub registry token to pull the Kuberos image, use the command in the file `temp_registry_credential`
 
- - Create a persistent volume claim (pvc) and a persistent volume (pc) for the Postgresql database and for storing static files.
+ - Label the master node
+If you have only one local K8s cluster, we recommend deploying all KubeROS components on the master node to improve communication between the KubeROS API server and the Kubernetes API server.
 
+```bash
+export MASTER_NODE=<node-name>
+kubectl label node $MASTER_NODE kuberos.io/kuberos=kuberos-control-plane
+# check it: 
+kubectl get no --show-labels
+```
+
+ - Create a persistent volume claim (pvc) and a persistent volume (pc) for the Postgresql database and for storing static files. 
+ Replace the **hostpath** before applying
 ```bash
 # Replace the hostpath in the PersistentVolume resource, then
 kubectl apply -f pv-pvc-kuberos.yaml
 ```
 
- - Deploy postgresql and redis pods
 
+ - Deploy postgresql and redis pods
 ```bash
 # Replace the nodeSeletor in both yaml file, then
 kubectl apply -f redis.yaml
