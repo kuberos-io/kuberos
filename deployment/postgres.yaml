@@ -32,7 +32,8 @@ spec:
           persistentVolumeClaim:
             claimName: postgres-pv-claim
       nodeSelector: 
-        kubernetes.io/hostname: server01
+        kuberos.io/kuberos: kuberos-control-plane
+        # kubernetes.io/hostname: server01
       tolerations: 
         - key: "node-role.kubernetes.io/control-plane"
           operator: "Exists"

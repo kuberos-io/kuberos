@@ -15,8 +15,8 @@ spec:
         pod: celery-worker
     spec:
       containers:
-      - name: kuberos-api-server
-        image: metagoto/kuberos:v0.2.1
+      - name: celery-workers
+        image: metagoto/kuberos:v0.3.0
         imagePullPolicy: Always
         command: ['/bin/bash']
         args: ['-c', 'celery -A settings worker -l info']
@@ -38,8 +38,9 @@ spec:
             claimName: data-pv-claim
       imagePullSecrets:
         - name: kuberos-test-repo
-      nodeSelector: 
-        kubernetes.io/hostname: server01
+      nodeSelector:
+        kuberos.io/kuberos: kuberos-control-plane
+        # kubernetes.io/hostname: server01
       tolerations: 
         - key: "node-role.kubernetes.io/control-plane"
           operator: "Exists"
