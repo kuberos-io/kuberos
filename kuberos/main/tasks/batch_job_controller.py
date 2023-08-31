@@ -76,6 +76,7 @@ def create_job_groups(
     value_list = [[*item['valueList']] for item in varying_param_list]
     all_combinations = list(itertools.product(*value_list))
     
+    queue_num = 0
     for combi in all_combinations:
         
         job_dep_manifest = copy.deepcopy(dep_manifest)
@@ -91,11 +92,14 @@ def create_job_groups(
         BatchJobGroup.objects.create(
             exec_cluster = exec_cluster_list[0],
             group_postfix = get_random_string(length=10, allowed_chars='abcdefghijklmnopqrstuvwxyz'),
+            queue_number = queue_num,
             deployment = batch_job_deployment,
             deployment_manifest = job_dep_manifest,
             repeat_num = lifecycle_module.get('repeatNum', 1),
             lifecycle_rosmodule_name = lifecycle_module.get('rosModuleName', '')
         )
+        
+        queue_num += 1
 
     return True
 
@@ -239,7 +243,8 @@ def scheduling_batch_jobs(
         sync_kubernetes_cluster(cluster_config=exec_cluster.cluster_config_dict, 
                                 get_usage=True,
                                 get_pods=True)
-        c_state = exec_cluster.get_cluster_state_for_batchjobs()
+        c_state = exec_cluster.get_cluster_state_for_batchjobs(
+            use_robot=batch_job_dep.use_robot)
         numb_of_allocatable_nodes = c_state['num_of_allocatable_nodes']
         
         logger.debug("[Batch Job Scheduling] Exec cluster : %s", scheduled_clusters_name)
@@ -488,29 +493,59 @@ def check_single_job_status(job_uuid: str) -> None:
 def single_job_terminating(job_uuid: str) -> None:
     """
     Terminate the single job.
+    [Optional] Write metadata to the volume.
     """
     job = KuberosJob.objects.get(uuid=job_uuid)
     
-    logger.debug("[Job Termintating] - Terminating <%s>", job.slug)
+    logger.debug("[Job Terminating] - Terminating <%s>", job.slug)
     
     kube_config = job.batch_job_group.exec_cluster.cluster_config_dict
     kube_exec = KuberosExecuter(kube_config=kube_config)
-    
+
     pod_list = job.get_all_deployed_pods()
     svc_list = job.get_all_deployed_svcs()
+
     
+    
+    # write metadata into the volume
+    mount_path = job.get_mount_path()
+    data = []
+    # configmap
+    configmap = job.get_configmaps_for_logging(pretty_dict=True)
+    data.append({
+        'dst_path': f"{mount_path}/configmap.yaml",
+        'content': [configmap]
+    })
+    
+    # logs
+    logs = job.get_logs(pretty_dict=True)
+    data.append({
+        'dst_path': f"{mount_path}/kuberos_job.log",
+        'content': [logs]
+    })
+
+    # logger.debug("x"*50)
+    logger.debug("[Job Termination]Writing metadata to the pod")
+    kube_exec.write_file_to_pod(
+        pod_name=job.discovery_server_pod_name,
+        data=data
+    )
+    # logger.debug("x"*50)
+    
+
+    # Delete the rosmodules 
     response = kube_exec.delete_rosmodules(
         pod_list=pod_list,
         svc_list=svc_list
     )
 
     if response['status'] == 'success':
-        logger.debug("[Job Termintating] ROS modules deleted")
+        logger.debug("[Job Terminating] ROS modules deleted")
         job.job_status = KuberosJob.StatusChoices.TERMINATING
         job.save()
 
     else:
-        logger.error("[Job Termintating] Failed to delete ROS modules")
+        logger.error("[Job Terminating] Failed to delete ROS modules")
         logger.error(response['errors'])
         job.add_error_msg(response['errors'])
         job.job_status = KuberosJob.StatusChoices.FAILED

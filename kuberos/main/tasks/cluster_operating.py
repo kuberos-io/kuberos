@@ -208,6 +208,7 @@ def sync_kubernetes_cluster(
     # get cluster resource usage
     if get_usage:
         resource_usage = kube_exec.get_resource_usage()
+        pods = kube_exec.get_pod_metrics()
         # if resource_usage['status'] == 'success':
         #     cluster.update_resource_usage(resource_usage['data'])
             
