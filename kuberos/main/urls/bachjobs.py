@@ -4,6 +4,7 @@ from django.urls import path
 # KubeROS
 from main.api.batchjobs import (
     BatchJobDeploymentViewSet,
+    BatchJobDataManagementViewSet,
 )
 
 urls = [
@@ -20,4 +21,10 @@ urls = [
              'delete': 'delete'
          })
          ),
+    
+    path('data_management/<str:batch_job_name>/',
+         BatchJobDataManagementViewSet.as_view({
+             'get': 'retrieve',
+         })
+         )
 ]
