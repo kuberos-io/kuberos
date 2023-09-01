@@ -5,25 +5,22 @@ Job Scheduler generates the pod list and svc for batch jobs
 # python
 import logging
 import copy
-import json
-import ruamel.yaml 
-from ruamel.yaml import YAML, load, safe_load
 
 # Pykuberos
-from .scheduler_base import SchedulingMsgs, RobotEntity
-from .manifest import RosModuleManifest, DeploymentManifest
+from .manifest import DeploymentManifest
 from .rosmodule import RosModule, DiscoveryServer
-from .manifest import RosModuleManifest
 from .rosparameter import RosParamMapList
-from .node import EdgeNodeGroup, FleetNode, NodeBase
-from .fleet import FleetState
+
 
 logger = logging.getLogger('scheduler')
+logger.propagate = False
 
+RESERVED_CPU_REQUEST = 0.3
 
 class JobScheduler():
     """
     Select the edge node for the job
+    Maximize the cluster utilization -> cpu over 60, incl. startup process, everage value
     """
     
     def __init__(self, 
@@ -39,6 +36,7 @@ class JobScheduler():
                 'job_uuid': self.get_uuid(),
                 'group_postfix': self.batch_job_group.group_postfix,
                 'job_postfix': self.slug,
+                'volume': self.volume,
                 'manifest': self.deployment_manifest,
             }
         
@@ -48,19 +46,13 @@ class JobScheduler():
                 'nodes': [{
                     'hostname': 'kube-edge-worker-02', 
                     'is_allocatable': True, 
-                    'cpu': 3.968162422, 
-                    'memory': 6.118108, 
+                    'cpu': 3.968162422,
+                    'cpu_allow': 3,
+                    'memory': 6.118108,
+                    'memory_allow': 6,
                     'storage': 3.2684154680000006, 
                     'num_pods': 0},
-                {
-                    'hostname': 'kube-simbot-02', 
-                    'is_allocatable': True, 
-                    'cpu': 3.9455201, 
-                    'memory': 5.321452000000001, 
-                    'storage': 3.1729054499999947, 
-                    'num_pods': 2}
-                    ]
-            }
+            ]}
         """
         
         self._deployment_manifest = DeploymentManifest(deployment_manifest)
@@ -90,6 +82,9 @@ class JobScheduler():
         
         # loop through the cluster node list 
         for node in self._cluster_state['nodes']:
+            
+            logger.debug("NODE STATE: %s", node)
+            
             # check if the node is allocatable
             allocatable = self.check_node_allocability(node, self._job_spec)
             
@@ -123,6 +118,31 @@ class JobScheduler():
             'rosmodules': [],
         }
         
+        # requested resources
+        resources = {}
+        job_requested_resources = self._job_spec.get('resources', None)
+        if job_requested_resources is not None:
+            requests = job_requested_resources.get('requests', None)
+            if requests is not None:
+                resources = {
+                    'requests': {
+                        'cpu': requests.get('cpu', 0),
+                        'memory': requests.get('memory', 0),
+                    }
+                }
+            # use the optimal resource request, if it is specified
+            optimals = job_requested_resources.get('optimals', None)
+            if optimals is not None:
+                if optimals.get('cpu', 0) < node['cpu_allow']:
+                    # node has sufficient cpu resources, use the optimal setup to improve the performance
+                    logger.debug("Node <%s> has sufficient CPU resources [Allocable: %s], use the optimals: %s", 
+                                 node['hostname'], 
+                                 node['cpu_allow'],
+                                 optimals['cpu'])
+                    resources['requests']['cpu'] = optimals['cpu']
+                if optimals.get('memory', 0) > node['memory_allow']:
+                    resources['requests']['memory'] = optimals['memory']
+        
         hostname = node['hostname']
         pod_name_postfix = f"-{job['group_postfix']}-{job['job_postfix']}"
         
@@ -131,7 +151,9 @@ class JobScheduler():
         
         sc_job['disc_server'] = self.schedule_discovery_server(
             hostname=hostname,
-            pod_name_postfix=pod_name_postfix
+            pod_name_postfix=pod_name_postfix,
+            requested_resources = resources,
+            volume = job['volume']
         )
         
         sc_job['configmaps'] = self.schedule_configmaps()
@@ -140,8 +162,10 @@ class JobScheduler():
         sc_job['rosmodules'] = self.schedule_rosmodules(
             hostname=hostname,
             group_postfix = job['group_postfix'],
-            job_postfix = job['job_postfix']
+            job_postfix = job['job_postfix'],
+            volume = job['volume']
         )
+        sc_job['cluster_node_info'] = node
         
         return sc_job
 
@@ -156,7 +180,7 @@ class JobScheduler():
                 'startupTimeout': 300,
                 'runningTimeout': 300,
                 'resources': {
-                    'numProNode': 1,
+                    'numProNode': 0,
                     'requests': {
                         'cpu': 1
                 }
@@ -168,12 +192,19 @@ class JobScheduler():
         if job_spec is not None:
             # convert the cpu unit
             try:
-                cpu = job_spec_from_manifest['resources']['requests'].get('cpu', 1)
+                # requested cpu
+                cpu = job_spec_from_manifest['resources']['requests'].get('cpu', 0)
                 if type(cpu) == str:
                     cpu = float(cpu.replace('m', '')) / 1000
                     job_spec_from_manifest['resources']['requests']['cpu'] = cpu
+                # optimal cpu
+                cpu_opt = job_spec_from_manifest['resources']['optimals'].get('cpu', 0)
+                if type(cpu_opt) == str:
+                    cpu_opt = float(cpu_opt.replace('m', '')) / 1000
+                if cpu_opt > cpu:
+                    job_spec_from_manifest['resources']['optimals']['cpu'] = cpu_opt
             except:
-                job_spec_from_manifest['resources']['requests']['cpu'] = 1
+                job_spec_from_manifest['resources']['requests']['cpu'] = 0
             job_spec.update(job_spec_from_manifest)
         
         return job_spec
@@ -190,25 +221,36 @@ class JobScheduler():
         
         # number of pods
         num_pods_requested = job_spec['resources']['numProNode']
-        num_pods_on_node = node['num_pods']
-        if num_pods_requested <= num_pods_on_node:
-            logger.warning("Node <%s> has %s pods running, %s pods requested",
-                           node['hostname'], num_pods_on_node, num_pods_requested)
-            return False
+        if num_pods_requested > 0:
+            num_pods_on_node = node['num_pods']
+            if num_pods_requested <= num_pods_on_node:
+                logger.warning("Node <%s> has %s pods running, %s pods requested",
+                            node['hostname'], num_pods_on_node, num_pods_requested)
+                return False
         
         # CPU usage
         cpu_requested = job_spec['resources']['requests']['cpu']
         cpu_available = node['cpu']
+        cpu_allocable = node['cpu_allow']
         if cpu_requested > cpu_available:
             logger.warning("Node <%s> has %s CPU available, %s CPU requested",
                            node['hostname'], cpu_available, cpu_requested)
+            return False
+        if cpu_requested > cpu_allocable - RESERVED_CPU_REQUEST:
+            logger.warning("Node <%s> has %s CPU allocable, %s CPU requested. [RESERVED: %s]",
+                           node['hostname'], 
+                           cpu_allocable - RESERVED_CPU_REQUEST,
+                           cpu_requested,
+                           RESERVED_CPU_REQUEST)
             return False
         
         return True
 
     def schedule_discovery_server(self,
                                   hostname,
-                                  pod_name_postfix) -> None:
+                                  pod_name_postfix,
+                                  requested_resources,
+                                  volume) -> None:
         """
         Schedule a discovery server
         """
@@ -217,7 +259,9 @@ class JobScheduler():
             port = 11811,
             target_node = hostname,
             add_env_for_introspection=False,
-            skip_running=True,
+            requested_resources = requested_resources,
+            volumes = [volume] if volume else [],
+            # skip_running=True,
         )
         
         return {
@@ -225,7 +269,7 @@ class JobScheduler():
             'svc': self._disc_server.service_manifest,
         }
 
-    
+
     def schedule_configmaps(self):
         self._configmaps = self._rosparam_maps.get_all_configmaps_for_deployment()
         # print("Configmaps: ", self._configmaps)
@@ -238,7 +282,11 @@ class JobScheduler():
                             hostname: str,
                             group_postfix: str,
                             job_postfix: str,
+                            volume: dict,
                             ) -> list:
+        # parse the volume:
+        
+        
         rosmodules = []
         for module_mani in self._deployment_manifest.rosmodules_mani:
             pod_name = f'{group_postfix}-{module_mani.name}-{job_postfix}'
@@ -247,6 +295,7 @@ class JobScheduler():
                 discovery_svc_name=self._disc_server.discovery_svc_name,
                 node_selector_type='node',
                 target=hostname,
+                volumes = [volume] if volume else [],
                 container_image=module_mani.container_image,
                 image_pull_secret=module_mani.container_registry['imagePullSecret'],
                 image_pull_policy=module_mani.container_registry['imagePullPolicy'],

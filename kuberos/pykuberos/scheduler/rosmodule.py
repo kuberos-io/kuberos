@@ -11,8 +11,6 @@ logger = logging.getLogger('scheduler')
 
 # DEFAULT_DDS_IMAGE_URL = 'metagoto/ros2_dds_server:humble-v1'
 DEFAULT_DDS_IMAGE_URL = 'metagoto/dds_introspection_node:humble-v1.1.1'
-# DEFAULT_IMAGE_PULL_SEC = 'kuberos-test-registry-token'
-# DEFAULT_IMAGE_PULL_SEC = 'kuberos-fogrobo-registry-token-test'
 DEFAULT_IMAGE_PULL_SEC = 'kuberos-fogrobo-registry-token-test-lala'
 
 DEFAULT_ROS_VERSION = 'humble'
@@ -39,10 +37,14 @@ class RosModule():
                  container_image: dict,  # from deployment request
                  entrypoint: list,
                  source_ws: str = None,
+                 
+                 volumes: list = None,
 
                  target: str = None,  # target node name or resource group
                  resource_group='edge',  # edge resource group
 
+                 requested_resources: dict = None, # for batch job
+                 
                  image_pull_secret: str = None,
                  image_pull_policy: str = 'Always',  # Always|IfNotPresent|Never
                  node_selector_type: str = 'node',  # node|resource_group
@@ -74,7 +76,10 @@ class RosModule():
 
         self._source_ws = source_ws
         
-        self._resources = {}
+        if requested_resources is not None:
+            self._resources = requested_resources
+        else:
+            self._resources = {}
         # self.requirements = module_manifest['requirements']
 
         # image registry
@@ -91,6 +96,11 @@ class RosModule():
         # rosparameters in yaml file
         self.volumes = []
         self.volume_mounts = []
+
+        if volumes is not None:
+            for volume in volumes:
+                self.volumes.append(volume['volume'])
+                self.volume_mounts.append(volume['volume_mount'])
 
         # rosparameter in key-value pair
         self.env = []
@@ -327,8 +337,10 @@ class DiscoveryServer(object):
                  image_pull_secret: str = None,
                  image_url: str = None,
                  image_pull_policy: str = 'Always',
+                 requested_resources: dict = None, # for batch job TODO: Review!
                  add_env_for_introspection: bool = True,  # TODO Review!
                  skip_running: bool = False, # TODO: Issue with DDS in NAV2
+                 volumes: list = None, # TODO: Review! To write the mata data to the volume
                  ) -> None:
         self._name = name
         self.port = port
@@ -349,6 +361,20 @@ class DiscoveryServer(object):
         self.target_port = 11811
         self.port_protocol = 'UDP'
 
+        if requested_resources is not None:
+            self._resources = requested_resources
+        else:
+            self._resources = {}
+        
+        # rosparameters in yaml file
+        self.volumes = []
+        self.volume_mounts = []
+
+        if volumes is not None:
+            for volume in volumes:
+                self.volumes.append(volume['volume'])
+                self.volume_mounts.append(volume['volume_mount'])
+
         self.env = []
         if add_env_for_introspection:
             self.set_env_for_introsprection()
@@ -360,7 +386,7 @@ class DiscoveryServer(object):
             # Issue: If we use cycloneDDS in the NAV2 example, 
             #        the CPU usage of discovery server node is about 1000 millicores.
             self._command = 'sleep 36000'
-        
+
 
     def set_env_for_introsprection(self):
         """
@@ -430,13 +456,11 @@ class DiscoveryServer(object):
                         'containerPort': self.target_port,
                         'protocol': self.port_protocol
                     }],
+                    'resources': self._resources,
                     'env': self.env,
-                    # 'resources': {
-                    #     'requests': {
-                    #         'cpu': '3000m'
-                    #     },
-                    # },
+                    'volumeMounts': self.volume_mounts,
                 }],
+                'volumes': self.volumes,
                 'imagePullSecrets': [
                     {
                         'name': self.image_pull_secret
