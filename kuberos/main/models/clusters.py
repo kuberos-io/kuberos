@@ -666,11 +666,18 @@ class ClusterNode(BaseModel):
         try:
             cap = self.get_capacity()
             use = self.get_usage()
+            requests = self.get_resources_requests()
+            # actual available resources
             result['cpu'] = cap['cpu'] - use['cpu']
             result['memory'] = cap['memory'] - use['memory']
             result['storage'] = cap['storage'] - use['storage']
+            # allocatable resources
+            result['cpu_allow'] = cap['cpu'] - requests['cpu']
+            result['memory_allow'] = cap['memory'] - requests['memory']
+            result['storage_allow'] = cap['storage'] - requests['storage']            
             # result['existed_pods'] = self.get_existed_pod_list()
             result['num_pods'] = len(self.get_existed_pod_list())
+            # result['pods'] = self.get_existed_pod_list()
             if result['cpu'] < 0 or result['memory'] < 0 or result['storage'] < 0:
                 result['is_allocatable'] = False
 
@@ -678,6 +685,57 @@ class ClusterNode(BaseModel):
             result['is_allocatable'] = False
 
         return result
+
+    def get_resources_requests(self) -> dict:
+        """
+        Calculate the total resources requests based on the existed pods
+        """
+        cpu = 0
+        memory = 0
+        storage = 0
+        
+        for pod in self.get_existed_pod_list():
+            spec = pod.get('pod').get('spec')
+            for container in spec.get('containers', []):
+                resources = container.get('resources', None)
+                if resources:
+                    requests = resources.get('requests')
+                    if requests:
+                        cpu += self.convert_cpu_unit(requests.get('cpu', 0))
+                        memory += self.convert_memory_unit(requests.get('memory', 0))
+                        storage += float(requests.get('storage', 0))
+        return {
+            'cpu': cpu,
+            'memory': memory,
+            'storage': storage
+        }
+    
+    @staticmethod
+    def convert_cpu_unit(cpu: str) -> float:
+        # TODO: Check other returned units
+        if cpu == 0:
+            return 0
+        if cpu.endswith('m'):
+            return float(cpu.rstrip('m')) / 10 ** 3
+        if cpu.endswith('n'):
+            return float(cpu.rstrip('n')) / 10 ** 9
+        cpu = float(cpu)
+        return cpu
+    
+    @staticmethod
+    def convert_memory_unit(memory: str) -> float:
+        # TODO Review
+        
+        if memory == 0:
+            return 0
+        if memory.endswith('Ki'):
+            return float(memory.rstrip('Ki')) / 10 ** 6
+        if memory.endswith('Mi'):
+            return float(memory.rstrip('Mi')) / 10 ** 3
+        if memory.endswith('Gi'):
+            return float(memory.rstrip('Gi'))
+        return 0
+
 
     def get_capacity(self) -> dict:
         """
@@ -821,6 +879,9 @@ class ClusterNode(BaseModel):
 
     def reset(self,
               soft_reset: bool = False) -> None:
+        """
+        DEPRECATED
+        """
         self.kuberos_registered = False
         self.is_alive = True
         self.kuberos_role = self.ROLE_CHOICES.UNASSIGNED

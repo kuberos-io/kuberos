@@ -32,6 +32,7 @@ Example:
 # Python 
 import uuid
 import logging
+import json
 
 # Django 
 from django.db import models
@@ -86,6 +87,12 @@ class BatchJobDeployment(UserRelatedBaseModel):
         blank=False,
     )
     
+    subname = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+    )
+
     is_active = models.BooleanField(
         default=True
     )
@@ -163,7 +170,7 @@ class BatchJobDeployment(UserRelatedBaseModel):
     
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=['name'],
+            models.UniqueConstraint(fields=['name', 'subname'],
                                     condition=models.Q(is_active=True), 
                                     name='unique_active_name_batch_job_deployment')
         ]
@@ -216,6 +223,16 @@ class BatchJobDeployment(UserRelatedBaseModel):
             jobs.extend(group.batch_kuberos_job_set.exclude(job_status=KuberosJob.StatusChoices.COMPLETED))
         return jobs
     
+    def get_volume_spec(self):
+        vol_spec = self.volume_spec
+        try:
+            vol_spec['type'] = self.job_spec['volume']['type']
+            vol_spec['username'] = self.job_spec['volume']['username']
+        except KeyError:
+            logger.warning("KeyError by getting volume spec. %s", self.job_spec)
+        return self.volume_spec
+
+
     def chech_timeout_waiting_for_finishing(self):
         """
         Check the timeout of the entire deployment.
@@ -278,7 +295,20 @@ class BatchJobDeployment(UserRelatedBaseModel):
         
         logger.debug("Batch job deployment completed in %s", (self.completed_at - self.started_at).seconds)
 
-
+    @property
+    def use_robot(self) -> bool:
+        """
+        Check whether using robots for batchjob execution.
+        Default: False
+        """
+        use_robot = False
+        metadata = self.deployment_manifest.get('metadata', None)
+        
+        if metadata:
+            use_robot = metadata.get('useRobotResource', False)
+        
+        return use_robot
+    
     @property
     def started_since(self):
         if not self.started_at:
@@ -305,6 +335,11 @@ class BatchJobGroup(models.Model):
     
     group_postfix = models.CharField(
         max_length=32,
+        blank=True,
+        null=True
+    )
+    
+    queue_number = models.IntegerField(
         blank=True,
         null=True
     )
@@ -601,11 +636,52 @@ class KuberosJob(models.Model):
             'group_postfix': self.batch_job_group.group_postfix,
             'job_postfix': self.slug,
             'manifest': self.batch_job_group.deployment_manifest,
-            'volume': self.volume,
+            'volume': self.get_job_volume(),
         }
         return res
 
+    def get_job_volume(self) -> dict:
+        
+        volume = self.volume
+        if not volume:
+            return {}
 
+        if volume['type'] == 'nfs':
+            if self.group_data_in_storage:
+                volume['volume_mount']['subPath'] = f"{volume['volume_mount']['subPath']}/queue_{self.batch_job_group.queue_number}/job_{self.slug}"
+            else:
+                volume['volume_mount']['subPath'] = f"{volume['volume_mount']['subPath']}/job_{self.slug}"
+        
+        return volume
+    
+    def get_mount_path(self) -> str:
+        if self.volume:
+            return self.volume['volume_mount']['mountPath']
+    
+    def get_configmaps_for_logging(self, pretty_dict=True) -> list:
+        
+        configmaps = []
+        for cm in self.batch_job_group.configmaps:
+            name = cm['name']
+            # remove the group postfix
+            name = name.replace(f'{self.batch_job_group.group_postfix}-', '')
+            configmaps.append({
+                'name': name,
+                'type': cm['type'],
+                'data': cm['content']
+            })
+        if pretty_dict:
+            configmaps = json.dumps(configmaps, indent=4, sort_keys=False)
+        
+        return configmaps
+    
+    def get_logs(self, pretty_dict=True) -> list:
+        if not self.save_logs_in_volume:
+            return 'Disabled'
+        if pretty_dict:
+            return json.dumps(self.logs, indent=4, sort_keys=False)
+        return self.logs
+    
     def initialize(self):
         """
         Initialize the job, set status as pending
@@ -619,12 +695,13 @@ class KuberosJob(models.Model):
             'pod_type': 'discovery_server', 
             'status': 'Pending'
         })
+
         svc_status_list.append({
             'name': self.scheduled_disc_server['svc']['metadata']['name'],
             'svc_type': 'discovery_server', 
             'status': 'Pending'
         })
-            
+
         # rosmodule
         for module in self.scheduled_rosmodules:
             pod_status_list.append({
@@ -632,7 +709,7 @@ class KuberosJob(models.Model):
                 'pod_type': 'ros_module',
                 'status': 'Pending'
             })
-            
+
         self.pod_status = pod_status_list
         self.svc_status = svc_status_list
         self.save()
@@ -683,6 +760,8 @@ class KuberosJob(models.Model):
         self.last_check_time = timezone.now()
         self.pod_status = pod_status
         self.svc_status = svc_status
+        # self.logs.append({'POD Status': f'[INFO] {timezone.now()} - {pod_status}'})
+        # self.logs.append({'SVC Status': f'[INFO] {timezone.now()} - {svc_status}'})
         self.save()
         
         action = 'next'
@@ -740,7 +819,36 @@ class KuberosJob(models.Model):
                     return True
         return False        
 
+    @property
+    def lifecycle_pod_name(self):
+        return f'{self.batch_job_group.group_postfix}-{self.batch_job_group.lifecycle_rosmodule_name}-{self.slug}'
 
+    @property
+    def save_logs_in_volume(self) -> bool:
+        """
+        Check whether saving logs in volume.
+        """
+        try:
+            return self.batch_job_group.deployment_manifest['jobSpec']['advances']['saveLogsInVolume']
+        except KeyError:
+            self.logs.append({'[Warning]': f'{timezone.now()} - KeyError by getting saveLogsInVolume. Set to False'})
+            return False
+        
+    @property
+    def group_data_in_storage(self) -> bool:
+        """
+        Check whether the group data is in storage.
+        """
+        try:
+            return self.batch_job_group.deployment_manifest['jobSpec']['advances']['groupDataInStorage']
+        except KeyError:
+            self.logs.append({'[Warning]': f'{timezone.now()} - KeyError by getting groupDataInStorage. Set to False'})
+            return False
+
+    @property
+    def discovery_server_pod_name(self):
+        return self.scheduled_disc_server['pod']['metadata']['name']
+    
     def is_discovery_servers_ready(self) -> bool:
         """
         Check if all discovery servers are ready.
