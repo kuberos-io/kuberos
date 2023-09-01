@@ -6,16 +6,17 @@ from typing import List
 
 # Kubernetes
 import kubernetes
-from kubernetes import client, config
+from kubernetes import client
+from kubernetes.stream import stream
 from kubernetes.client.rest import ApiException
 from urllib3.exceptions import MaxRetryError
 
 
-
 logger = logging.getLogger('pykuberos')
+logger.propagate = False
 
 
-DELETE_POD_GRACE_TIME_PERIOD = 10 # seconds
+DELETE_POD_GRACE_TIME_PERIOD = 3 # seconds
 
 
 class KubeConfig():
@@ -28,7 +29,7 @@ class KubeConfig():
                  ) -> None:
 
         self._cluster_config = kubernetes.client.Configuration()
-
+        
         self._cluster_config.host = k8s_config_dict['host_url']
         self._cluster_config.api_key['authorization'] = k8s_config_dict['service_token']
         self._cluster_config.api_key_prefix['authorization'] = 'Bearer'
@@ -44,7 +45,6 @@ class KubeConfig():
         Return the cluster config object
         """
         return self._cluster_config
-
 
 
 class ExecutionResponse():
@@ -176,12 +176,14 @@ class KubernetesExecuter():
         self._ns = namespace
 
         self._kube_client = kubernetes.client.ApiClient(
-            self._kube_config.cluster_config)
+            self._kube_config.cluster_config
+        )
+        
         self._kube_core_api = kubernetes.client.CoreV1Api(self._kube_client)
 
         self._response = ExecutionResponse()
 
-        logger.debug("KubernetesExecuter initialized.")
+        # logger.debug("KubernetesExecuter initialized.")
 
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -241,7 +243,8 @@ class KubernetesExecuter():
 
     ### NODE ###
     def get_nodes_status(self,
-                   node_selector=None) -> ExecutionResponse:
+                   node_selector = None,
+                   get_namespaced_pods = False) -> ExecutionResponse:
         """
         Get node status in the cluster
         TODO: TimeoutError
@@ -249,6 +252,11 @@ class KubernetesExecuter():
         try:
             res = self._kube_core_api.list_node()
 
+            if get_namespaced_pods:
+                ns_pods = self._kube_core_api.list_namespaced_pod(
+                    namespace=self._ns
+                )
+            
             nodes = []
             for item in res.items:
                 node = {
@@ -257,6 +265,20 @@ class KubernetesExecuter():
                     'status': self._kube_client.sanitize_for_serialization(item.status),
                     'ready': self.check_node_readiness(item), # bool
                 }
+                
+                # Get the pods in the namespace
+                # For BatchJob scheduler
+                # TODO Review
+                if get_namespaced_pods:
+                    node['status']['pods'] = []
+                    for pod in ns_pods.items:
+                        
+                        if pod.spec.node_name == node['name']:
+                            node['status']['pods'].append(
+                                {'namespace': self._ns,
+                                 'pod': self._kube_client.sanitize_for_serialization(pod)}
+                            )
+
                 nodes.append(node)
 
             self._response.set_data(nodes)
@@ -415,6 +437,25 @@ class KubernetesExecuter():
 
         return self._response.to_dict()
 
+    def list_pod_in_namespace(self,
+                              namespace: str = None) -> dict:
+        """
+        List all pods in the given namespace
+        """
+        if not namespace:
+            namespace = self._ns
+            
+        try: 
+            res = self._kube_core_api.list_namespaced_pod(
+                namespace=namespace
+            )
+            self._response.set_data(res)
+            self._response.set_success()
+        except ApiException as exc:
+            self._response.raise_api_exception_error(exc)
+        
+        return self._response.to_dict()
+
 
     ### SERVICE ###
     def create_service(self,
@@ -556,9 +597,6 @@ class KubernetesExecuter():
                 name=name
             )
 
-            # print("x " * 20)
-            # print(res)
-            
             # check the response status
             if res.status == 'Success': # snippet from response: {..., "status": "Success"}
                 self._response.set_data(self._kube_client.sanitize_for_serialization(res))
@@ -568,10 +606,11 @@ class KubernetesExecuter():
                     reason='FailedToDeleteConfigmap',
                     err_msg='Failed to delete configmap.'
                 )
-            
+        
+        # if the configmap is not found, set the response as success
         except ApiException as exc:
             if exc.reason == 'Not Found':
-                # if the configmap is not found, set the response as success
+                
                 self._response.set_success()
             else:
                 self._response.raise_api_exception_error(str(exc))
@@ -628,6 +667,7 @@ class KubernetesExecuter():
         Get nodes resource usage
         via kubernetes state metrics server
         TODO: Review and cleaning
+        TODO: Rename to get_node_metrics
         """
 
         # Connect to the CustomObjects API to fetch metrics
@@ -657,6 +697,91 @@ class KubernetesExecuter():
             
         return self._response.to_dict()
 
+    def get_pod_metrics(self):
+        """
+        Get pods resource usage
+        via kubernetes state metrics server
+        """
+        custom_api = client.CustomObjectsApi(self._kube_client)
+
+        # Define the API endpoint details
+        group = 'metrics.k8s.io'
+        version = 'v1beta1'
+        plural = 'pods'
+        
+        try:
+            metrics = custom_api.list_namespaced_custom_object(group, version, self._ns, plural)
+            
+            for pod in metrics['items']:
+                print(pod)
+            
+            self._response.set_data(metrics['items'])
+            self._response.set_success()
+            
+        except ApiException as e:
+            print(e)
+            self._response.raise_api_exception_error(e)
+            
+        return self._response.to_dict()   
+        
+    
+    def write_file_to_pod(self, pod_name, data):
+        """
+        cat << EOF > file.test
+        cd "$HOME"
+        echo "$PWD" # echo the current path
+        EOF\n
+        """
+
+        try:
+            exec_cmd = ['/bin/sh']
+            resp = stream(self._kube_core_api.connect_get_namespaced_pod_exec,
+                        pod_name,
+                        self._ns,
+                        command=exec_cmd,
+                        stderr=True, stdin=True,
+                        stdout=True, tty=False,
+                        _preload_content=False)
+
+            # add the content to the command
+            cmd = []
+            for item in data:
+                content = item['content']
+                dst_path = item['dst_path']
+                
+                cmd.append(f'cat << EOF > {dst_path}')
+                for line in content:
+                    cmd.append(line)
+                cmd.append('EOF\n')
+                
+             # write to the file
+            while resp.is_open():
+                resp.update(timeout=1)
+                if resp.peek_stdout():
+                    logger.info("STDOUT: %s" % resp.read_stdout())
+                if resp.peek_stderr():
+                    logger.error("STDERR: %s" % resp.read_stderr())
+                if cmd:
+                    c = cmd.pop(0)
+                    print("Running command... %s\n" % c)
+                    resp.write_stdin(c + "\n")
+                else:
+                    break
+                
+            resp.close()
+            self._response.set_success()
+        # resp.write_stdin("date\n")
+        # sdate = resp.readline_stdout(timeout=3)
+        # print("Server date command returns: %s" % sdate)
+        # resp.write_stdin("whoami\n")
+        # user = resp.readline_stdout(timeout=3)
+        # print("Server user is: %s" % user)
+        
+        except ApiException as e:
+            logger.error("Writing file to pod - Exception occurred")
+            self._response.raise_api_exception_error(e)
+    
+        return self._response.to_dict()   
 
 
 class KuberosExecuter(KubernetesExecuter):
@@ -764,7 +889,7 @@ class KuberosExecuter(KubernetesExecuter):
         """
         try: 
             for pod in pod_list:
-                logger.debug("Check pod status: %s", pod['name'])
+                # logger.debug("Check pod status: %s", pod['name'])
                 check_res=self.check_pod_status(pod_name=pod['name'])
                 pod.update(check_res['data'])
             self._response.set_data(pod_list)
@@ -788,7 +913,7 @@ class KuberosExecuter(KubernetesExecuter):
         """
         try:
             for svc in svc_list:
-                logger.debug("Check svc status: %s", svc['name'])
+                # logger.debug("Check svc status: %s", svc['name'])
                 check_res=self.check_service_status(svc_name=svc['name'])
                 svc.update(check_res['data'])
             self._response.set_data(svc_list)
