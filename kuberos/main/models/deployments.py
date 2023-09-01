@@ -736,4 +736,3 @@ class DeploymentJob(models.Model):
             return True
         except:
             return False
-

@@ -907,8 +907,11 @@ class KuberosJob(models.Model):
 
 
     def get_all_deployed_svcs(self) -> list:
-        
-        return [self.scheduled_disc_server['svc']['metadata']['name']]
+        if self.scheduled_disc_server:
+            return [self.scheduled_disc_server['svc']['metadata']['name']]
+        else:
+            logger.error("Discovery server is not scheduled.")
+            return []
 
     def get_pod_status(self):
         return self.pod_status
