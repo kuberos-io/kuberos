@@ -37,7 +37,7 @@ class ClusterViewSet(viewsets.ViewSet):
         """
         List all clusters
         
-        GET /api/clusters/
+        GET /api/<version>/clusters/
         """
         
         response = KuberosResponse()
@@ -56,7 +56,7 @@ class ClusterViewSet(viewsets.ViewSet):
         """
         Register a new cluster in KubeROS platform
         
-        POST /api/clusters/
+        POST /api/<version>/clusters/
         """
 
         logger.debug('Received request to register a new cluster in KubeROS')

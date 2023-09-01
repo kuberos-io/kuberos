@@ -87,32 +87,39 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
         job_spec = manifest_dict.get('jobSpec', None)
         
         # Get cluster list
-        # TODO: check whether the cluster is valid
-        exec_clusters = []
-        for cluster in meta_data['execClusters']:
-            cluster_obj = Cluster.objects.get(cluster_name=cluster)
-            exec_clusters.append(cluster_obj)
-
+        # Check whether the cluster is valid
+        exec_clusters, non_exist_clusters = self.check_the_cluster_existences(meta_data['execClusters'])
+        if len(non_exist_clusters) > 0:
+            response.set_failed(
+                reason='ClusterNotExist',
+                err_msg=f'Following clusters <{non_exist_clusters}> do not exist.'
+            )
+            return Response(response.to_dict(),
+                            status=status.HTTP_202_ACCEPTED)
+        
+        # create batch job deployment
+        batch_job_dep = BatchJobDeployment.objects.create(
+            name=meta_data['name'],
+            subname=meta_data.get('subname', ''),
+            created_by=request.user,
+            deployment_manifest=manifest_dict,
+            job_spec=job_spec,
+            startup_timeout = job_spec.get('startupTimeout', DEFAULT_STARTUP_TIMEOUT),
+            running_timeout = job_spec.get('runningTimeout', DEFAULT_RUNNING_TIMEOUT),
+        )
+        
         # volume 
         volume_spec = job_spec.get('volume', None)
         if volume_spec:
             host_path = f"/kuberos/data/batchjobs/{meta_data['name']}"
             volume = self.parse_volume(volume_spec=volume_spec, 
                                            host_path=host_path,
-                                           subpath=meta_data['name'])
+                                           subpath=f"{batch_job_dep.name}__{batch_job_dep.subname}")
         else:
             volume = {}
-
-        # create batch job deployment
-        batch_job_dep = BatchJobDeployment.objects.create(
-            name=meta_data['name'],
-            created_by=request.user,
-            deployment_manifest=manifest_dict,
-            job_spec=job_spec,
-            startup_timeout = job_spec.get('startupTimeout', DEFAULT_STARTUP_TIMEOUT),
-            running_timeout = job_spec.get('runningTimeout', DEFAULT_RUNNING_TIMEOUT),
-            volume_spec = volume,
-        )
+        batch_job_dep.volume_spec = volume
+        batch_job_dep.save()    
+        
         
         # Add clusters 
         for cluster in exec_clusters:
@@ -259,7 +266,10 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
         """
         Delete the batch jobs by name
         """
-        is_hard_delete = request.data.get('hard_delete', False)
+        # is_hard_delete = request.data.get('hard_delete', False)
+        # if is_hard_delete == 'true':
+        #     is_hard_delete = True
+        is_hard_delete = True if request.data['hard_delete'] == 'True' else False
         
         response = KuberosResponse()
         
@@ -311,7 +321,21 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
         return Response(response.to_dict(),
                         status=status.HTTP_200_OK)
         
-        
+    
+    def check_the_cluster_existences(self, cluster_list):
+        """
+        Check whether the clusters exist
+        """
+        exist_clusters = []
+        non_exist_clusters = []
+        for cluster_name in cluster_list:
+            try:
+                cluster = Cluster.objects.get(cluster_name=cluster_name)
+                exist_clusters.append(cluster)
+            except Cluster.DoesNotExist:
+                non_exist_clusters.append(cluster_name)
+        return exist_clusters, non_exist_clusters
+
         
     @staticmethod
     def parse_volume(volume_spec: dict, host_path: str, subpath: str) -> dict:
@@ -339,11 +363,14 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
             }
         
         if volume_spec['type'] == 'nfs':
+            
+            root_path = volume_spec.get('nfsRootPath', '/srv/nfs4')
+            
             volume = {
                 'name': 'nfs-volume',
                 'nfs': {
                     'server': volume_spec['nfsServer'],
-                    'path': '/srv/nfs4'
+                    'path': root_path
                 }
             }
             volume_mount = {
@@ -355,7 +382,8 @@ class BatchJobDeploymentViewSet(viewsets.ViewSet):
 
         return {
             'volume': volume,
-            'volume_mount': volume_mount
+            'volume_mount': volume_mount,
+            'type': volume_spec['type'],
         }
 
 
@@ -372,9 +400,8 @@ class BatchJobDataManagementViewSet(viewsets.ViewSet):
             batch_job = BatchJobDeployment.objects.get(name=batch_job_name,
                                                        is_active=True)
             
-            serializer = BatchJobDeploymentSerializer(batch_job)
-            
-            response.set_data(serializer.data)
+            volume_spec = batch_job.get_volume_spec()
+            response.set_data(volume_spec)
             response.set_success()
             return Response(response.to_dict(),
                             status=status.HTTP_200_OK)
@@ -388,3 +415,4 @@ class BatchJobDataManagementViewSet(viewsets.ViewSet):
             )
             return Response(response.to_dict(),
                             status=status.HTTP_202_ACCEPTED)
+            
