@@ -1,15 +1,16 @@
 # Message Conventions
 
 
-To make the interface more clear between different components, we develop the KubeROS platform with following message structure convention, which will ensure the consistency and improve communication between different components. 
+To make the interface more clear between different components, we develop the KubeROS platform with following message structure convention. It aims to ensure the consistency and improve communication between different components. 
 
+We aim to use a consistent response structure to make the development easier 
 
 ## Response message convention from backend. 
 
 Typically, KubeROS use following convention: 
 ```python
 {
-    'status': 'success' | 'accepted' | 'rejected' | 'failed'
+    'status': 'success' | 'accepted' | 'rejected' | 'failed' | 'pending'
     'data' : {...} # your data 
     'errors' [
         {

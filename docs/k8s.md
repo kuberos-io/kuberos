@@ -25,7 +25,7 @@ Installing and configuring a Kubernetes cluster is a challenging and not straigh
 ### Disable Swap
 The Linux Swap **MUST** be disabled in order for the kubelet to work properly!
 
-To temporarily disable it: 
+To temporarily disable it:
 ```bash
 sudo swapoff -a
 ```

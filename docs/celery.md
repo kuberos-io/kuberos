@@ -21,13 +21,13 @@ In the development with devContainer, a redis server is already started to act a
 
 If you want to do it manually: 
 
-```
-sudo apt-get update 
+```bash
+sudo apt-get update
 sudo apt-get install redis
 ```
 
 Then start the redis-server with default settings: 
-```
+```bash
 redis-server
 # check wether the redis server is up and running: 
 redis-clit
@@ -39,17 +39,17 @@ redis-clit
 
 Start the celery workers: 
 Navigate to the kuberos folder and start the workers for development with verbose output for debugging.
-```
+```bash
 /workspace/kuberos $ celery -A settings worker -l info
 ```
 
 Start the beat service in a separate process: 
-```
+```bash
 /workspace/kuberos $ celery -A settings beat -l info
 ```
 
 
-Note: 
+*Note*: 
  - For any changes in the code related to celery tasks, you must restart the celery workers.
 
 
