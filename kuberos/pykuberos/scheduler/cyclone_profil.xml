@@ -1,0 +1,26 @@
+<CycloneDDS xmlns="https://cdds.io/config" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
+    <Domain id="any">
+         <General>
+           <Interfaces>
+              <!-- <NetworkInterface address="192.168.62.179"  multicast="false" /> -->
+              <NetworkInterface name="eth0" multicast="false" />
+           </Interfaces>
+           <AllowMulticast>false</AllowMulticast>
+           <EnableMulticastLoopback>false</EnableMulticastLoopback>
+        </General>
+
+        <Discovery>
+            <Peers>
+                <Peer address="192.168.62.161"/>
+                <Peer address="192.168.62.179"/>
+            </Peers>
+            <ParticipantIndex>auto</ParticipantIndex>
+        </Discovery>
+        <!--
+        <Tracing>
+            <Verbosity>config</Verbosity>
+            <OutputFile>stdout</OutputFile>
+        </Tracing>
+        -->
+    </Domain>
+</CycloneDDS>
