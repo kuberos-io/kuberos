@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: kuberos-api-server
-        image: metagoto/kuberos:v0.3.0
+        image: metagoto/kuberos:v0.3.1
         imagePullPolicy: Always
         env:
           - name: PORT

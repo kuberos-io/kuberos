@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: celery-workers
-        image: metagoto/kuberos:v0.3.0
+        image: metagoto/kuberos:v0.3.1
         imagePullPolicy: Always
         command: ['/bin/bash']
         args: ['-c', 'celery -A settings worker -l info']
