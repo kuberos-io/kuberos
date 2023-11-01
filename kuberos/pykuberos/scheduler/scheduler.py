@@ -338,43 +338,12 @@ class KuberosScheduler(object):
                                 'sc_onboard': sc_onboard,
                                 'sc_edge': sc_edge
                             })
-            # self.assign_static_pod_ip()
+
             # print for debugging 
             self._rosparam_maps.print()
             self.print_sc_result()
             
         return self.sc_res, sc_global_res
-    
-    def assign_static_pod_ip(self):
-        # discovery server
-        for sc_robo in self.sc_res:
-            for disc_server in sc_robo['sc_disc_server']:
-                disc_server['pod']['metadata'].update(
-                    {'annotations':{
-                        'cni.projectcalico.org/ipAddrs': self.get_next_ip()
-                                    }}
-                )
-        
-            # onboard modules
-            for sc_onboard in sc_robo['sc_onboard']:
-                sc_onboard['metadata'].update(
-                    {'annotations':{
-                        'cni.projectcalico.org/ipAddrs': self.get_next_ip()
-                                    }}
-                )
-                
-            # edge modules
-            for sc_onboard in sc_robo['sc_edge']:
-                sc_onboard['metadata'].update(
-                    {'annotations':{
-                        'cni.projectcalico.org/ipAddrs': self.get_next_ip()
-                                    }}
-                )
-
-
-    def get_next_ip(self):
-        self.ip_last_digit_start += 1
-        return "[\"192.168.16.{}\"]".format(self.ip_last_digit_start)
             
     def get_global_resources(self) -> dict:
         """
@@ -385,7 +354,7 @@ class KuberosScheduler(object):
         return {
             'sc_configmaps': configmap_list,
         }
-                
+
         
     def schedule_rosmodule(self):
         """
