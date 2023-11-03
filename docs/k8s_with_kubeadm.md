@@ -182,7 +182,7 @@ sudo apt-mark hold kubelet kubeadm kubectl
 
 ### Initialize the cluster 
 ```bash
-sudo kubeadm init --pod-network-cidr=192.168.0.0/16
+sudo kubeadm init --pod-network-cidr=192.168.0.0/16 --control-plane-endpoint xx.xx.xx.xx
 # Unknown error, when the pod-network-cidr is not specified
 ```
 Copy the admin.conf to your local home directory and allow regular users to run `kubectl` without sudo permissions. 
