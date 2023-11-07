@@ -192,6 +192,7 @@ class RobotEntity():
                 image_pull_policy=module_mani.container_registry['imagePullPolicy'],
                 entrypoint=module_mani.entrypoint,
                 source_ws=module_mani.source_ws,
+                privileged=module_mani.privileged,
                 )
             
             # Attach ros parameters and environment variables
@@ -241,6 +242,7 @@ class RobotEntity():
                 image_pull_policy=module_mani.container_registry['imagePullPolicy'],
                 entrypoint=module_mani.entrypoint,
                 source_ws=module_mani.source_ws,
+                privileged=module_mani.privileged,
                 )
             
             # Attach ros parameters and environment variables

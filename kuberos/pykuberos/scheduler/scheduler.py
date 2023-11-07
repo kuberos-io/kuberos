@@ -355,7 +355,6 @@ class KuberosScheduler(object):
             'sc_configmaps': configmap_list,
         }
 
-        
     def schedule_rosmodule(self):
         """
         Schedule the rosmodule across the entire fleet, edge and the cloud.

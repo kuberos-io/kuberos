@@ -46,6 +46,9 @@ class RosModule():
 
                  requested_resources: dict = None, # for batch job
                  
+                 privileged: bool = False,
+                 advances: dict = None, # for create nodeport, mount device folder
+                 
                  image_pull_secret: str = None,
                  image_pull_policy: str = 'Always',  # Always|IfNotPresent|Never
                  node_selector_type: str = 'node',  # node|resource_group
@@ -103,6 +106,20 @@ class RosModule():
                 self.volumes.append(volume['volume'])
                 self.volume_mounts.append(volume['volume_mount'])
 
+        self._advances = advances
+        
+        # security context
+        if not privileged:
+            self._security_context = {
+                'allowPrivilegeEscalation': False,
+                'privileged': False
+            }
+        else:
+            self._security_context = {
+                'privileged': True
+            }
+            logger.warning("Container %s is running in privileged mode, be careful!!!", self._name)
+            
         # rosparameter in key-value pair
         self.env = []
         self.ros_launch_args = []
@@ -140,7 +157,7 @@ class RosModule():
             'metadata': {
                 'name': self._name,
                 'labels': {
-                    # 'app-name': metadata['appName'],
+                    'pod-name': self._name,
                     # 'app-version': self.app_metadata['appVersion']
                 }
             },
@@ -160,7 +177,16 @@ class RosModule():
                     'env': self.env,
                     'volumeMounts': self.volume_mounts,
                     'resources': self._resources,
-                }],
+                    'securityContext': self._security_context,
+                },
+                    # {
+                    # 'image': 'eclipse/zenoh-bridge-dds:latest',
+                    # 'name': 'zenoh-bridge',
+                    # 'imagePullPolicy': self._image_pull_policy,
+                    # 'command': ["/bin/sh"],
+                    # 'args': ['-c', 'sleep 3600'],
+                    # },
+                ],
                 'volumes': self.volumes,
                 'imagePullSecrets': [
                     {
@@ -171,6 +197,34 @@ class RosModule():
             }
         }
         return self._pod_manifest
+
+    @property
+    def svc_manifests(self):
+        self._svc_manifests = []
+        
+        if not self._advances:
+            return []
+        
+        for item in self._advances:
+            if item['type'] == 'nodePort':
+                svc = {
+                    'apiVersion': 'v1',
+                    'kind': 'Service',
+                    'metadata':{
+                        'name': item['name'] + self._name,
+                        'labels': {'svc-name': item['name'] + self._name,}
+                    },
+                    'spec':{
+                        'type': 'NodePort',
+                        'selector': {'pod-name': self._name},
+                        'ports':[{
+                            'port': item['containerPort'],
+                            'targetPort': item['containerPort'],
+                            'nodePort': item['hostPort']
+                        }]
+                    }
+                }
+            self._svc_manifests.append(svc)
 
     def set_resources_request_limit(self, 
                                     requests: dict,
@@ -191,7 +245,11 @@ class RosModule():
         Return the kubernetes pod manifests for deploying the ros module to the target nodes.
         """
         return self.pod_manifest
-
+    
+        # return {
+        #     'pod': self.pod_manifest,
+        #     'svc': self.svc_manifests
+        # }
 
     def attach_configmap_yaml(self,
                               configmap_name: str,

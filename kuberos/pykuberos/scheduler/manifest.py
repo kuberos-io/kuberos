@@ -287,6 +287,13 @@ class RosModuleManifest(object):
     @property
     def requirements(self)-> dict:
         return self._requirements 
+    
+    @property
+    def privileged(self) -> bool:
+        """
+        Return privilege mode
+        """
+        return self._requirements.get('privileged', False)
         
     @property
     def container_image(self) -> dict:
