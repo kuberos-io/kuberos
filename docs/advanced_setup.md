@@ -37,9 +37,9 @@ sudo mv k9s /usr/bin
 
 ### Metrics Server 
 
-disable ssl 
+Get the latest deployment yaml file from [kubernetes-sigs/metrics-server](https://github.com/kubernetes-sigs/metrics-server)
 
-Add the `- --kubelet-insecure-tls` in container args as follow: 
+To disable the certificate validation for using in the local network, add the `- --kubelet-insecure-tls` in container args as follow: 
 
 ```YAML
 apiVersion: apps/v1
