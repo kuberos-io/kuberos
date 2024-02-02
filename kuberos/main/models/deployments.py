@@ -540,6 +540,16 @@ class DeploymentJob(models.Model):
     def get_all_rosmodules(self) -> list:
         return self.onboard_modules + self.edge_modules + self.cloud_modules
     
+    def get_all_pods(self) -> list:
+        # return all pods
+        pod_list = []
+        for module in self.onboard_modules:
+            pod_list.extend(module['pod'])
+        for module in self.edge_modules:
+            pod_list.extend(module['pod'])
+        for module in self.cloud_modules:
+            pod_list.extend(module['pod'])
+    
     def get_all_deployed_pods(self) -> list:
         pod_name_list = []
         
